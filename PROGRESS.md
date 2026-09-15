@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 0, foundation built, blocked on the CI half of the exit criterion
-- Last completed exit criterion: none. `make lint` and `make test` pass, but Phase 0 also requires CI green on first push, and no remote exists yet.
-- Blocked on: no GitHub remote. The repository has one local commit (8b16da1) and has never been pushed, so `.github/workflows/ci.yml` has never executed. Creating the remote needs the human. Separately, WSL2 has no Linux distribution installed, which will block Phase 2 Spark work.
-- Next action: human creates the GitHub repository and supplies the remote URL. Then push, confirm CI green, and only then start Phase 1.
+- Current phase: 1, not started. Phase 0 is complete.
+- Last completed exit criterion: Phase 0. `make lint` and `make test` pass, and CI is green on the first push (`c486cdc` to `Tshepang-amir/mortgage-risk-platform`).
+- Blocked on: nothing blocking the start of Phase 1. Still open for later: WSL2 has no Linux distribution, which gates Phase 2 Spark work, and the Fannie Mae files need a human download before Phase 3.
+- Next action: Phase 1, encode the Fannie Mae field layout as typed definitions, write the synthetic panel generator, write ADR-002 for the quarter subsetting, and make `data/README.md` name the exact six files.
 
 ---
 
@@ -21,8 +21,8 @@ Update these four lines at the end of every session. They are the first thing re
 
 | Phase | Name | Status | Completed |
 | --- | --- | --- | --- |
-| 0 | Foundation | blocked | |
-| 1 | Data contracts and synthetic generator | not started | |
+| 0 | Foundation | complete | 2026-09-15 |
+| 1 | Data contracts and synthetic generator | in progress | |
 | 2 | Bronze and Silver | not started | |
 | 3 | Golden-record test | not started | |
 | 4 | Gold panel | not started | |
@@ -55,7 +55,7 @@ Things that are unresolved and will bite later if forgotten.
 | Item | Raised | Status |
 | --- | --- | --- |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
-| No GitHub remote exists. Phase 0's exit criterion requires CI green on first push, so Phase 0 cannot close until the human creates the repository. | 2026-09-15 | open, blocking Phase 0 |
+| No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green on `c486cdc` |
 | WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | open, blocks Phase 2 |
 | Security policy blocks execution of uv virtualenv launchers on this host, so the native `make check` cannot run on Windows. Working via a Linux container (ADR-003). Revisit when the Phase 2 environment is settled. | 2026-09-15 | open, mitigated |
 | Eight section 9 directories are not yet created because nothing populates them yet: `dags/`, `governance/`, `dashboards/`, `infra/`, `tests/property/`, `tests/integration/`, `tests/data/`, `tests/golden/`. Deliberate deferral, not drift. Each is created by the phase that fills it. | 2026-09-15 | open, tracked |
@@ -156,3 +156,29 @@ Rather than a placeholder test, the test suite is a structure assertion: it chec
 10. `git status` clean: pass.
 
 **Next action:** blocked on the human. Create the GitHub repository and give me the remote URL, then I push, confirm CI green, and close Phase 0. Phase 1 will not be started before that. The WSL2 distribution question should be settled in parallel, since it gates Phase 2.
+
+---
+
+### 2026-09-15, Phase 0 boundary: exit criterion met
+
+**What I set out to do:** close the remaining half of the Phase 0 exit criterion, CI green on first push.
+
+**What I actually did:** added `origin` pointing at `https://github.com/Tshepang-amir/mortgage-risk-platform.git`, confirmed by unauthenticated `git ls-remote` that the repository existed and was empty, so the first push could not collide with GitHub-initialised files. Pushed `main`.
+
+**What works now, with evidence:**
+
+- `git push -u origin main` succeeded: `* [new branch] main -> main`.
+- Local and remote `main` agree at `c486cdcf87f56a51b3119d1a90b41a43da3fa2fd`.
+- The `ci.yml` workflow badge reports `passing`, re-fetched with a cache-busting query string and `Cache-Control: no-cache`.
+
+**What is broken or incomplete:** nothing in Phase 0. One evidence caveat worth recording: the GitHub REST API returned HTTP 403, `API rate limit exceeded`, for the shared corporate egress IP, so the run's JSON conclusion could not be read directly and the workflow badge is the evidence instead. The badge reflects the last completed run on the default branch, and only one push has ever occurred, so it refers to this run. If a future session needs run-level detail, it will need an authenticated request or the browser.
+
+**Decisions made and why:** none new. No ADR was warranted; the repository name came from PROJECT.md section 1 rather than from a choice.
+
+**Results produced:** none. Phase 0 produces no metrics and the ledger stays empty until Phase 5.
+
+**Surprises, dead ends, and what I learned from them:** the unauthenticated GitHub API is rate-limited per source IP, and on a corporate network that IP is shared, so the limit can be exhausted by other traffic entirely. The workflow badge is served from a different host and was unaffected, which makes it a usable fallback for a pass or fail signal, though not for run detail.
+
+**Repo review, section 10, ten points:** clean, 10/10, unchanged from the earlier entry today. The only changes since were `PROGRESS.md` and the addition of a git remote; no new files, no new dependencies, `git status` clean, working tree matches the pushed commit.
+
+**Next action:** Phase 1, data contracts and synthetic generator. Exit criterion: the synthetic panel generates, validates against the schema, and is usable by every downstream test, and the human instruction file is unambiguous. First question to settle is the authoritative source for the Fannie Mae field layout, since encoding 108 fields from memory would be fabrication of a data contract.
