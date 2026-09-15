@@ -206,3 +206,24 @@ This entry corrects earlier entries rather than editing them, per the rule at th
 **Consequence to remember:** anyone who cloned before this point has a divergent history and would need to re-clone. Nobody had.
 
 **Next action:** unchanged, Phase 1. This entry changes nothing about phase status. Phase 0 remains complete.
+
+---
+
+### 2026-09-15, evidence update: CI confirmed at run level
+
+The Phase 0 boundary entry recorded that the GitHub REST API was rate-limited from the shared corporate egress IP, that the workflow badge was standing in as evidence, and that run-level detail would need an authenticated request. That last part was wrong: the limit is a rolling per-IP window and it simply reset. No authentication was needed.
+
+Run-level confirmation, `GET /actions/runs`, all four runs `completed` with conclusion `success`:
+
+| Commit | Conclusion | Subject |
+| --- | --- | --- |
+| `625ea69` | success | docs: correcting entry for the commit hash rewrite |
+| `b61bbdc` | success | docs: close Phase 0, CI green on first push |
+| `1cc70bc` | success | superseded by the rewrite |
+| `c486cdc` | success | superseded by the rewrite |
+
+Phase 0's exit criterion is therefore evidenced at run level rather than by badge, on the rewritten history as well as the original. Phase 0 remains complete and nothing else changes.
+
+**Lesson for later sessions:** an unauthenticated GitHub API 403 on this network means the shared IP's window is exhausted, not that the call needs credentials. Retry before assuming a harder constraint.
+
+**Next action:** unchanged, Phase 1.
