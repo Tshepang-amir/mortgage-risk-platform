@@ -11,7 +11,7 @@ This file exists so that a session starting cold can reconstruct where work stop
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
 - Current phase: 1, not started. Phase 0 is complete.
-- Last completed exit criterion: Phase 0. `make lint` and `make test` pass, and CI is green on the first push (`c486cdc` to `Tshepang-amir/mortgage-risk-platform`).
+- Last completed exit criterion: Phase 0. `make lint` and `make test` pass, and CI is green on `Tshepang-amir/mortgage-risk-platform` at `b61bbdc`. Commit hashes changed on 2026-09-15 by a history rewrite; see the correcting entry at the end of this file.
 - Blocked on: nothing blocking the start of Phase 1. Still open for later: WSL2 has no Linux distribution, which gates Phase 2 Spark work, and the Fannie Mae files need a human download before Phase 3.
 - Next action: Phase 1, encode the Fannie Mae field layout as typed definitions, write the synthetic panel generator, write ADR-002 for the quarter subsetting, and make `data/README.md` name the exact six files.
 
@@ -55,7 +55,7 @@ Things that are unresolved and will bite later if forgotten.
 | Item | Raised | Status |
 | --- | --- | --- |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
-| No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green on `c486cdc` |
+| No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green, now at `b61bbdc` after the history rewrite |
 | WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | open, blocks Phase 2 |
 | Security policy blocks execution of uv virtualenv launchers on this host, so the native `make check` cannot run on Windows. Working via a Linux container (ADR-003). Revisit when the Phase 2 environment is settled. | 2026-09-15 | open, mitigated |
 | Eight section 9 directories are not yet created because nothing populates them yet: `dags/`, `governance/`, `dashboards/`, `infra/`, `tests/property/`, `tests/integration/`, `tests/data/`, `tests/golden/`. Deliberate deferral, not drift. Each is created by the phase that fills it. | 2026-09-15 | open, tracked |
@@ -182,3 +182,27 @@ Rather than a placeholder test, the test suite is a structure assertion: it chec
 **Repo review, section 10, ten points:** clean, 10/10, unchanged from the earlier entry today. The only changes since were `PROGRESS.md` and the addition of a git remote; no new files, no new dependencies, `git status` clean, working tree matches the pushed commit.
 
 **Next action:** Phase 1, data contracts and synthetic generator. Exit criterion: the synthetic panel generates, validates against the schema, and is usable by every downstream test, and the human instruction file is unambiguous. First question to settle is the authoritative source for the Fannie Mae field layout, since encoding 108 fields from memory would be fabrication of a data contract.
+
+---
+
+### 2026-09-15, correcting entry: commit hashes rewritten
+
+This entry corrects earlier entries rather than editing them, per the rule at the top of this file.
+
+**What happened:** every commit carried a `Co-Authored-By` trailer naming the AI tool, which GitHub renders as a second entry under Contributors in the repository sidebar. This is a portfolio repository intended to be read as the author's own work, so the trailer was removed from all three commits with `git filter-branch --msg-filter`, and `main` was force-updated on the remote.
+
+**Every commit hash quoted in earlier entries is therefore stale.** The mapping is:
+
+| Old | New | Subject |
+| --- | --- | --- |
+| `8b16da1` | `fdce08e` | feat: scaffold Phase 0 foundation |
+| `c486cdc` | `ea35539` | docs: record Phase 0 outcome and repo review in PROGRESS.md |
+| `1cc70bc` | `b61bbdc` | docs: close Phase 0, CI green on first push |
+
+**What did not change:** the tree hash of the tip is `cfe3707ac9e8396480c40475074b4aaa475fed44` both before and after the rewrite, so the file contents are byte-identical. Only commit messages, and therefore commit hashes, differ. Authorship was already correct and was not touched. The backup refs `filter-branch` leaves under `refs/original/` were deleted, the reflog expired and `git gc --prune=now` run, so the old commits are unreachable locally as well as remotely.
+
+**Why this was safe:** single contributor, single clone, no forks, no open pull requests, and the push used `--force-with-lease` pinned to the exact expected remote hash, so it would have refused had the remote moved.
+
+**Consequence to remember:** anyone who cloned before this point has a divergent history and would need to re-clone. Nobody had.
+
+**Next action:** unchanged, Phase 1. This entry changes nothing about phase status. Phase 0 remains complete.
