@@ -17,7 +17,32 @@ It cannot be fetched programmatically, and no attempt is made to scrape it.
 
 <https://capitalmarkets.fanniemae.com/credit-risk-transfer/single-family-credit-risk-transfer/fannie-mae-single-family-loan-performance-data>
 
-**The exact file manifest — which six acquisition quarters, their filenames,
-and the checksums to verify them against — is defined in Phase 1.** Do not
-place files here yet; Phase 1 will name precisely what is needed and halt until
-those files exist.
+## Phase 1 raw file manifest
+
+Download the **Primary dataset** quarterly files from Data Dynamics after
+registration and accepting Fannie Mae's terms:
+
+<https://datadynamics.fanniemae.com/data-dynamics/#/reportMenu;category=HP>
+
+Place exactly these files in `data/raw/`, keeping the filenames unchanged:
+
+| Acquisition quarter | Required filename | Purpose |
+| --- | --- | --- |
+| 2005Q1 | `2005Q1.csv` | Pre-crisis origination that seasons into the crash |
+| 2005Q3 | `2005Q3.csv` | Second pre-crisis vintage for within-regime variation |
+| 2007Q1 | `2007Q1.csv` | Peak-risk vintage |
+| 2012Q1 | `2012Q1.csv` | Post-crisis tightened underwriting |
+| 2016Q1 | `2016Q1.csv` | Benign vintage for out-of-time validation |
+| 2018Q1 | `2018Q1.csv` | Vintage that seasons into the 2020 shock |
+
+Expected raw format: headerless pipe-delimited text, one row per loan-month.
+The Phase 1 contract validates the 108-field public sample layout and the
+110-field official R-importer extension documented in ADR-004.
+
+Fannie Mae does not publish checksums with these files. After download, record
+local SHA-256 values in PROGRESS.md before Phase 3 golden-record work begins.
+On Windows PowerShell:
+
+```powershell
+Get-FileHash data\raw\2005Q1.csv -Algorithm SHA256
+```

@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 1, not started. Phase 0 is complete.
-- Last completed exit criterion: Phase 0. `make lint` and `make test` pass, and CI is green on `Tshepang-amir/mortgage-risk-platform` at `b61bbdc`. Commit hashes changed on 2026-09-15 by a history rewrite; see the correcting entry at the end of this file.
-- Blocked on: nothing blocking the start of Phase 1. Still open for later: WSL2 has no Linux distribution, which gates Phase 2 Spark work, and the Fannie Mae files need a human download before Phase 3.
-- Next action: Phase 1, encode the Fannie Mae field layout as typed definitions, write the synthetic panel generator, write ADR-002 for the quarter subsetting, and make `data/README.md` name the exact six files.
+- Current phase: 2, not started. Phase 1 is complete.
+- Last completed exit criterion: Phase 1. The Fannie Mae raw schema is encoded, synthetic panel generation validates against it, reusable pytest fixtures exist, and `data/README.md` names the exact six raw files. Direct Docker check passed on 2026-09-15: Ruff clean, mypy clean, pytest 42 passed with 92.21 percent coverage. The official public sample CSV also validated locally: 757 rows accepted by the 108-field schema.
+- Blocked on: Phase 2 environment decision. WSL2 has no Linux distribution, which gates Spark work unless the project explicitly switches to container Spark. The Fannie Mae files still need a human download before Phase 3.
+- Next action: resolve the Phase 2 Spark runtime path: install a WSL2 Linux distribution or write an ADR accepting a containerised Spark runtime.
 
 ---
 
@@ -22,7 +22,7 @@ Update these four lines at the end of every session. They are the first thing re
 | Phase | Name | Status | Completed |
 | --- | --- | --- | --- |
 | 0 | Foundation | complete | 2026-09-15 |
-| 1 | Data contracts and synthetic generator | in progress | |
+| 1 | Data contracts and synthetic generator | complete | 2026-09-15 |
 | 2 | Bronze and Silver | not started | |
 | 3 | Golden-record test | not started | |
 | 4 | Gold panel | not started | |
@@ -69,8 +69,9 @@ One line per ADR, pointing at the full record.
 | ADR | Decision | File |
 | --- | --- | --- |
 | ADR-001 | Python 3.11 and uv for dependency management | `docs/decisions/ADR-001-toolchain.md` |
-| ADR-002 | Reserved by PROJECT.md section 3 for the acquisition-quarter subsetting decision, written in Phase 1 | not yet written |
+| ADR-002 | Use six regime-spanning acquisition quarters: 2005Q1, 2005Q3, 2007Q1, 2012Q1, 2016Q1 and 2018Q1 | `docs/decisions/ADR-002-acquisition-quarter-subset.md` |
 | ADR-003 | Containerised development toolchain, because policy blocks local virtualenv execution | `docs/decisions/ADR-003-dev-environment.md` |
+| ADR-004 | Use the 108-field sample layout as the Phase 1 default while accepting the 110-field official R-importer extension | `docs/decisions/ADR-004-fannie-mae-schema-version.md` |
 
 ---
 
@@ -227,3 +228,25 @@ Phase 0's exit criterion is therefore evidenced at run level rather than by badg
 **Lesson for later sessions:** an unauthenticated GitHub API 403 on this network means the shared IP's window is exhausted, not that the call needs credentials. Retry before assuming a harder constraint.
 
 **Next action:** unchanged, Phase 1.
+
+---
+
+### 2026-09-15, Phase 1 boundary: exit criterion met
+
+**What I set out to do:** execute Phase 1 after Phase 0 was confirmed complete: encode the Fannie Mae field layout, build a deterministic synthetic loan-month panel with known ground truth, make pytest fixtures available for downstream phases, write ADR-002 for the acquisition-quarter subset, and make the raw-data instructions unambiguous.
+
+**What I actually did:** encoded the Fannie Mae Single-Family Loan Performance positional contract in `src/mortgage_risk/data/schema.py`. The default supported raw width is the 108-field public sample layout, with support for the 110-field official Primary R importer extension. Added `src/mortgage_risk/data/synthetic.py`, which generates deterministic headerless pipe-delimited loan-month rows plus separate loan-level ground-truth outcomes for default, prepayment and censoring. Added reusable pytest fixture `synthetic_panel` in `tests/conftest.py` and focused unit tests for schema validation and synthetic generation. Updated `data/README.md` with the six exact required primary files: `2005Q1.csv`, `2005Q3.csv`, `2007Q1.csv`, `2012Q1.csv`, `2016Q1.csv`, and `2018Q1.csv`. Wrote ADR-002 for the subset decision and ADR-004 for the schema-version mismatch between the sample CSV, R importer and latest glossary.
+
+**What works now, with evidence:** direct Docker check passed from PowerShell using the ADR-003 Linux toolchain: `ruff check` reported all checks passed, `ruff format --check` reported 29 files already formatted, `mypy` reported success on 19 source files, and `pytest` collected 42 tests, all passed, with total coverage 92.21 percent. The downloaded official sample CSV validated against the 108-field schema: 757 rows accepted.
+
+**What is broken or incomplete:** native Windows `uv run ruff format .` remains blocked by local execution/cache policy, consistent with ADR-003. `make docker-check` also remains Git-Bash-oriented because PowerShell treats `MSYS_NO_PATHCONV=1` as a command; running the equivalent `docker run` command directly from PowerShell works. Real Fannie Mae files are not present under `data/raw/`, and their local SHA-256 hashes cannot be recorded until the human downloads them.
+
+**Decisions made and why:** ADR-002 keeps six regime-spanning acquisition quarters so the project remains small enough for the target environment while retaining crisis, post-crisis and out-of-time cohorts. ADR-004 keeps the 108-field sample layout as Phase 1 default but accepts the 110-field official R importer extension, because the public artefacts disagree and pretending otherwise would make Phase 2 brittle.
+
+**Results produced:** none. Phase 1 produces contracts and fixtures, not model metrics; the results ledger remains empty.
+
+**Surprises, dead ends, and what I learned from them:** the current public artefacts disagree on field count: the sample CSV is 108 fields, the official Primary R importer names 110 fields, and the latest glossary dated 2026-09-10 runs through position 114. The schema now records that evidence instead of collapsing it into a single undocumented assumption. `apply_patch` also failed before modifying files because the Windows sandbox wrapper could not prepare the writable-root policy, so file writes were split through smaller PowerShell/Python writes.
+
+**Repo review, section 10, ten points:** clean, 10/10, with notes. No generated artefacts or raw data are tracked; `data/` still tracks only `data/README.md`; new modules are imported by tests; no new runtime dependencies were added; naming remains snake_case; ADRs record the non-obvious choices; direct Docker lint, typecheck and tests are clean; `git status` has only the intended Phase 1 working-tree changes.
+
+**Next action:** Phase 2 is next but blocked on the Spark runtime path. Either install a WSL2 Linux distribution or write an ADR accepting containerised Spark for Bronze/Silver work.
