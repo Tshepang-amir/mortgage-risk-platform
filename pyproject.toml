@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mortgage-risk-platform"
+version = "0.1.0"
+description = "Mortgage PD modelling, IFRS 9 ECL and a bank-grade model validation pack."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+
+# Runtime dependencies are added in the phase that first imports them.
+# PROJECT.md section 10: nothing in pyproject.toml that is not imported.
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff>=0.14",
+  "mypy>=1.18",
+  "pytest>=8.4",
+  "pytest-cov>=7.0",
+  "pre-commit>=4.3",
+  "detect-secrets>=1.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mortgage_risk"]
+
+# ---------------------------------------------------------------------------
+# Lint and format. Section 10: zero ruff errors.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",      # pycodestyle
+  "F",           # pyflakes
+  "I",           # import sorting
+  "N",           # pep8-naming
+  "UP",          # pyupgrade
+  "B",           # bugbear
+  "A",           # builtin shadowing
+  "C4",          # comprehensions
+  "SIM",         # simplify
+  "PTH",         # use pathlib
+  "ARG",         # unused arguments
+  "ANN",         # type annotations, section 10 requires them
+  "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use asserts freely and need no return annotations on test functions.
+"tests/**/*.py" = ["ANN201", "ANN001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mortgage_risk"]
+
+# ---------------------------------------------------------------------------
+# Type checking. Section 10: mypy clean.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+pretty = true
+files = ["src", "tests"]
+
+# ---------------------------------------------------------------------------
+# Tests.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov=mortgage_risk",
+  "--cov-report=term-missing",
+  "--cov-fail-under=70",
+]
+markers = [
+  "slow: test takes more than a few seconds",
+  "spark: test requires a live Spark session",
+]
+
+[tool.coverage.run]
+source = ["src/mortgage_risk"]
+branch = true

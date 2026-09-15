@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# PROJECT.md section 10, repository hygiene point 1: no generated artefacts.
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+dist/
+build/
+*.egg-info/
+.tox/
+.nox/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Spark, Delta and MLflow local state. Never committed.
+# ---------------------------------------------------------------------------
+spark-warehouse/
+metastore_db/
+derby.log
+mlruns/
+mlartifacts/
+.checkpoint/
+_delta_log/
+*.crc
+
+# ---------------------------------------------------------------------------
+# Section 10 point 2: no data in git.
+# Everything under data/ is ignored except its README and small fixtures
+# (<100 KB) that tests depend on.
+# ---------------------------------------------------------------------------
+data/*
+!data/README.md
+!data/fixtures/
+data/fixtures/*
+!data/fixtures/*.json
+!data/fixtures/*.csv
+
+# Data formats, wherever they land
+*.parquet
+*.delta
+*.csv.gz
+*.zip
+*.7z
+
+# ---------------------------------------------------------------------------
+# Secrets. Section 10: .env.example only.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.yaml
+credentials.json
+
+# Airflow local runtime
+airflow.db
+airflow-webserver.pid
+logs/
