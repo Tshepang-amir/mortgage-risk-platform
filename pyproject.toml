@@ -12,7 +12,10 @@ license = { text = "MIT" }
 
 # Runtime dependencies are added in the phase that first imports them.
 # PROJECT.md section 10: nothing in pyproject.toml that is not imported.
-dependencies = []
+dependencies = [
+  "delta-spark>=4.0,<5",
+  "great-expectations[spark]>=1.23,<2",
+]
 
 [dependency-groups]
 dev = [

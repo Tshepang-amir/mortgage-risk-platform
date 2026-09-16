@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 2, not started. Phase 1 is complete.
-- Last completed exit criterion: Phase 1. The Fannie Mae raw schema is encoded, synthetic panel generation validates against it, reusable pytest fixtures exist, and `data/README.md` names the exact six raw files. Direct Docker check passed on 2026-09-15: Ruff clean, mypy clean, pytest 42 passed with 92.21 percent coverage. The official public sample CSV also validated locally: 757 rows accepted by the 108-field schema.
-- Blocked on: Phase 2 environment decision. WSL2 has no Linux distribution, which gates Spark work unless the project explicitly switches to container Spark. The Fannie Mae files still need a human download before Phase 3.
-- Next action: resolve the Phase 2 Spark runtime path: install a WSL2 Linux distribution or write an ADR accepting a containerised Spark runtime.
+- Current phase: 3, blocked on the real-data download. Phase 2 is complete.
+- Last completed exit criterion: Phase 2. Bronze replay is idempotent, Silver is typed and deduplicated, code labels and the SCD Type 2 servicer dimension are built, and the Great Expectations gate passes on synthetic data. Full Docker check passed on 2026-09-16: Ruff clean, mypy clean, pytest 45 passed with 92.00 percent coverage.
+- Blocked on: the six Fannie Mae quarterly files still require a human download before the Phase 3 golden-record test can run.
+- Next action: download the six files named in `data/README.md`, record their SHA-256 hashes, then reproduce Fannie Mae published summary figures from Silver for Phase 3.
 
 ---
 
@@ -23,7 +23,7 @@ Update these four lines at the end of every session. They are the first thing re
 | --- | --- | --- | --- |
 | 0 | Foundation | complete | 2026-09-15 |
 | 1 | Data contracts and synthetic generator | complete | 2026-09-15 |
-| 2 | Bronze and Silver | not started | |
+| 2 | Bronze and Silver | complete | 2026-09-16 |
 | 3 | Golden-record test | not started | |
 | 4 | Gold panel | not started | |
 | 5 | Baselines and scorecard | not started | |
@@ -56,9 +56,9 @@ Things that are unresolved and will bite later if forgotten.
 | --- | --- | --- |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
 | No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green, now at `b61bbdc` after the history rewrite |
-| WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | open, blocks Phase 2 |
-| Security policy blocks execution of uv virtualenv launchers on this host, so the native `make check` cannot run on Windows. Working via a Linux container (ADR-003). Revisit when the Phase 2 environment is settled. | 2026-09-15 | open, mitigated |
-| Eight section 9 directories are not yet created because nothing populates them yet: `dags/`, `governance/`, `dashboards/`, `infra/`, `tests/property/`, `tests/integration/`, `tests/data/`, `tests/golden/`. Deliberate deferral, not drift. Each is created by the phase that fills it. | 2026-09-15 | open, tracked |
+| WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | resolved by containerised Spark in ADR-005 |
+| Security policy blocks execution of uv virtualenv launchers on this host, so the native `make check` cannot run on Windows. Working via a Linux container (ADR-003). Revisit when the Phase 2 environment is settled. | 2026-09-15 | open, mitigated by ADR-003 and ADR-005 |
+| Six section 9 directories are not yet created because nothing populates them yet: `dags/`, `governance/`, `dashboards/`, `infra/`, `tests/property/`, `tests/golden/`. Deliberate deferral, not drift. Each is created by the phase that fills it. | 2026-09-15 | open, tracked |
 
 ---
 
@@ -72,6 +72,7 @@ One line per ADR, pointing at the full record.
 | ADR-002 | Use six regime-spanning acquisition quarters: 2005Q1, 2005Q3, 2007Q1, 2012Q1, 2016Q1 and 2018Q1 | `docs/decisions/ADR-002-acquisition-quarter-subset.md` |
 | ADR-003 | Containerised development toolchain, because policy blocks local virtualenv execution | `docs/decisions/ADR-003-dev-environment.md` |
 | ADR-004 | Use the 108-field sample layout as the Phase 1 default while accepting the 110-field official R-importer extension | `docs/decisions/ADR-004-fannie-mae-schema-version.md` |
+| ADR-005 | Run local Spark and Delta Lake in a Java-enabled Linux container | `docs/decisions/ADR-005-containerised-spark-runtime.md` |
 
 ---
 
@@ -250,3 +251,26 @@ Phase 0's exit criterion is therefore evidenced at run level rather than by badg
 **Repo review, section 10, ten points:** clean, 10/10, with notes. No generated artefacts or raw data are tracked; `data/` still tracks only `data/README.md`; new modules are imported by tests; no new runtime dependencies were added; naming remains snake_case; ADRs record the non-obvious choices; direct Docker lint, typecheck and tests are clean; `git status` has only the intended Phase 1 working-tree changes.
 
 **Next action:** Phase 2 is next but blocked on the Spark runtime path. Either install a WSL2 Linux distribution or write an ADR accepting containerised Spark for Bronze/Silver work.
+
+
+---
+
+### 2026-09-16, Phase 2 boundary: exit criterion met
+
+**What I set out to do:** resolve the Spark runtime decision that blocked Phase 2, then implement Bronze and Silver on Delta Lake with provenance, typing, deduplication, code decoding, a slowly changing servicer dimension, a Great Expectations transition gate, and a test proving ingestion replay is idempotent.
+
+**What I actually did:** accepted ADR-005 and added a Java 17 development image plus Java 17 in CI. Locked Delta Lake 4.4.0, PySpark 4.1.3 and Great Expectations 1.23.0. Added an all-string Bronze schema and append-only ingestion with source filename, source path, SHA-256, field count and ingest timestamp. Exact source filename and hash replays are skipped. Added Silver casting from the Phase 1 field contract, deterministic loan-month deduplication, decoded channel, purpose, property, occupancy, zero-balance and delinquency labels, and an SCD Type 2 loan-servicer assignment dimension. Silver publication runs a nine-expectation GX suite first and can write failed candidates to a quarantine Delta path.
+
+**What works now, with evidence:** the end-to-end synthetic test writes a headerless raw file, ingests it twice with identical Bronze row counts, publishes Silver twice with identical row counts, verifies date and decimal types, verifies decoded labels and provenance, and checks one current servicer assignment per synthetic loan. A separate GX test injects a duplicate loan-month and is rejected by expect_compound_columns_to_be_unique. The SCD2 test changes servicer and verifies the old assignment closes in the preceding month while the new assignment remains current. The complete container check passed: Ruff clean, 37 files formatted, mypy clean on 26 source files, and pytest 45 passed in 212.48 seconds with 92.00 percent coverage.
+
+**What is broken or incomplete:** the six real Fannie Mae quarterly files are still absent, so the Phase 2 DQ suite has passed on synthetic data only and Phase 3 cannot run. Native Windows virtualenv launchers remain blocked by policy. The managed network intercepts Maven TLS with a Cloudflare Gateway root trusted by Windows but not by the base image's Java store; the public root was used only in a temporary local truststore for the first Delta download, and the Maven artefacts now live in the ignored Docker mrp-ivy volume. CI uses the normal GitHub trust chain and does not need this host-specific step.
+
+**Decisions made and why:** ADR-005 accepts containerised local Spark because Docker Desktop is healthy, there is no user WSL distribution, and waiting for an Intune-dependent installation would leave Phase 2 blocked. Spark uses local[2], two shuffle partitions, and loopback for both the bound and advertised driver address so local executors work inside one container. Delta 4.4 and Spark 4.1 are kept within their official compatibility line.
+
+**Results produced:** none. Phase 2 creates validated data layers and no model metric; the results ledger remains empty.
+
+**Surprises, dead ends, and what I learned from them:** the patch helper again failed before editing because the Windows sandbox wrapper could not enforce split writable roots, so edits used narrowly scoped PowerShell writes after that failure. The first dependency lock exceeded the command timeout but completed the lockfile write. Delta 4.4 uses Spark-versioned Maven coordinates such as delta-spark_4.1_2.13. After resolving TLS trust, Spark initially failed because spark.driver.bindAddress was loopback while spark.driver.host still advertised the container address; pairing both on loopback fixed the single-container local runtime.
+
+**Repo review, section 10, ten points:** clean, 10/10. No generated artefacts, certificates, Delta files, Maven jars or raw data are tracked; data/ still tracks only its README; all new source modules are imported by tests; both runtime dependencies are imported; there are no dead files or empty directories; the new tests/data/ and tests/integration/ directories match section 9; naming is consistent; notebook state is unchanged; git diff --check is clean; the worktree contains only the intended Phase 2 changes before commit.
+
+**Next action:** obtain the six quarterly files listed in data/README.md, record their SHA-256 hashes, run the Silver DQ suite on them, and begin Phase 3 by reproducing Fannie Mae's published statistical summary.

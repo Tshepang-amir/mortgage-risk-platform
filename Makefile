@@ -8,13 +8,14 @@
 UV := uv
 # Full bookworm, not slim: git is required by the hygiene tests and by
 # detect-secrets, both of which enumerate tracked files.
-DEV_IMAGE := ghcr.io/astral-sh/uv:python3.11-bookworm
+DEV_IMAGE := mortgage-risk-dev:local
 # MSYS_NO_PATHCONV stops Git Bash rewriting the container-side /w path into
 # a Windows drive letter. It is inert on Linux and macOS.
-DOCKER_RUN := MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv $(DEV_IMAGE)
+export MSYS_NO_PATHCONV := 1
+DOCKER_RUN := docker run --rm -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv -v mrp-ivy:/root/.ivy2.5.2 $(DEV_IMAGE)
 
 .PHONY: help install hooks lint format typecheck test structure check clean
-.PHONY: docker-check docker-shell secrets-baseline
+.PHONY: docker-build docker-check docker-shell secrets-baseline
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -44,11 +45,14 @@ structure: ## Assert the repo matches PROJECT.md section 9
 
 check: lint typecheck structure test ## Everything CI runs. Use before every commit.
 
-docker-check: ## Run the full check inside a Linux container (see ADR-003)
+docker-build: ## Build the Java-enabled Linux development image
+	docker build -f Dockerfile.dev -t $(DEV_IMAGE) .
+
+docker-check: docker-build ## Run the full check inside a Linux container (see ADR-005)
 	$(DOCKER_RUN) bash -c 'git config --global --add safe.directory /w && uv sync --all-groups --quiet && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest'
 
-docker-shell: ## Interactive shell in the dev container
-	MSYS_NO_PATHCONV=1 docker run --rm -it -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv $(DEV_IMAGE) bash
+docker-shell: docker-build ## Interactive shell in the dev container
+	docker run --rm -it -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv -v mrp-ivy:/root/.ivy2.5.2 $(DEV_IMAGE) bash
 
 secrets-baseline: ## Regenerate the detect-secrets baseline
 	$(DOCKER_RUN) bash -c 'git config --global --add safe.directory /w && uv sync --all-groups --quiet && uv run detect-secrets scan --exclude-files "uv.lock" > .secrets.baseline'

@@ -4,8 +4,9 @@ Mortgage credit risk on Fannie Mae loan performance data: a discrete-time
 hazard probability-of-default model, an IFRS 9 expected credit loss layer, and
 a model validation pack of the kind a bank's model risk function would demand.
 
-**Status: Phase 0 of 11.** Foundation only. No models trained, no results
-produced. This README is recruiter-facing and is written properly in Phase 11,
+**Status: Phase 2 of 11 complete.** Bronze and Silver data layers are
+implemented. No models have been trained and no results produced.
+This README is recruiter-facing and is written properly in Phase 11,
 once there are numbers to put at the top of it.
 
 - [PROJECT.md](PROJECT.md) is the specification and the standard.
@@ -28,8 +29,9 @@ launchers, run the same checks in a Linux container instead:
 make docker-check
 ```
 
-Both run identical commands. See
-[ADR-003](docs/decisions/ADR-003-dev-environment.md) for why, and
-[ADR-001](docs/decisions/ADR-001-toolchain.md) for the Python and uv choice.
-
-Spark work from Phase 2 onward runs inside WSL2 on Windows hosts.
+Both run identical commands. The Docker image includes Java 17 for Spark and
+persists the local Maven cache between runs. See
+[ADR-005](docs/decisions/ADR-005-containerised-spark-runtime.md) for the Spark
+runtime decision, [ADR-003](docs/decisions/ADR-003-dev-environment.md) for the
+managed-host constraint, and [ADR-001](docs/decisions/ADR-001-toolchain.md) for
+the Python and uv choice.
