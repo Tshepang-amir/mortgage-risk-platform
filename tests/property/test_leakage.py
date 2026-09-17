@@ -30,6 +30,7 @@ from mortgage_risk.features.macro import (
     MacroObservation,
     join_macro_point_in_time,
     macro_observations_frame,
+    parse_fred_initial_releases,
 )
 from mortgage_risk.validation.splits import SplitIntegrityError, assign_model_splits
 
@@ -355,3 +356,45 @@ def test_panel_rows_reconcile_to_at_risk_loan_months(spark_session: SparkSession
     assert reconciliation.terminal_or_post_exit_rows > 0, (
         "no rows were excluded, so the fixture never exercises censoring"
     )
+
+
+def test_parsed_fred_releases_respect_publication_lag_end_to_end(
+    spark_session: SparkSession,
+) -> None:
+    """Close the seam between FRED ingestion and the point-in-time join.
+
+    The macro-lag test above builds its own vintage frame, so it proves the
+    join honours AVAILABLE_DATE but never exercises the parser that produces
+    those dates. This test runs a realistic FRED payload through the parser and
+    into the join.
+
+    US unemployment for August 2015 was published on 4 September 2015, and the
+    September figure on 2 October 2015. A loan-month at 1 October 2015 therefore
+    knows the August figure and cannot know the September one.
+    """
+    payload = {
+        "observations": [
+            {"date": "2015-08-01", "realtime_start": "2015-09-04", "value": "5.1"},
+            {"date": "2015-09-01", "realtime_start": "2015-10-02", "value": "5.0"},
+        ]
+    }
+    macro = macro_observations_frame(spark_session, parse_fred_initial_releases("UNRATE", payload))
+
+    as_of = _month(2015, 10)
+    frame = spark_session.createDataFrame(
+        [("L0000000001", as_of)],
+        spark_types.StructType(
+            [
+                spark_types.StructField("LOAN_ID", spark_types.StringType(), False),
+                spark_types.StructField("ACT_PERIOD", spark_types.DateType(), False),
+            ]
+        ),
+    )
+    row = join_macro_point_in_time(frame, macro, series_ids=("UNRATE",)).first()
+    assert row is not None
+
+    assert row["UNRATE"] == Decimal("5.100000"), (
+        "expected the August figure, the latest published by 1 October 2015"
+    )
+    assert row["UNRATE_OBSERVATION_DATE"] == _month(2015, 8)
+    assert row["UNRATE_AVAILABLE_DATE"] == date(2015, 9, 4)

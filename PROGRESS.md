@@ -13,7 +13,7 @@ Update these four lines at the end of every session. They are the first thing re
 - Current phase: 4 complete. Phase 5 not started.
 - Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
 - Blocked on: the raw files are present but their layout has 113 pipe-separated tokens, and `SUPPORTED_FIELD_COUNTS` accepts only 108 or 110. Real-data ingestion cannot run until the current Fannie Mae file layout document confirms whether that is 112 fields plus a trailing delimiter or 113 fields. Obtaining that document is a human step behind the same login.
-- Next action: obtain the current file layout and glossary from Fannie Mae Data Dynamics, amend ADR-004, extend the schema, then re-run Bronze and Silver on real data.
+- Next action: obtain the current file layout and glossary from Fannie Mae Data Dynamics, amend ADR-004, extend the schema, then re-run Bronze and Silver on real data. The macro ingestion gap is closed, so this schema question is the only thing blocking progress.
 
 ---
 
@@ -55,7 +55,7 @@ Things that are unresolved and will bite later if forgotten.
 | Item | Raised | Status |
 | --- | --- | --- |
 | Raw files carry 113 pipe-separated tokens; the Phase 1 contract accepts 108 or 110. Token 1 is a real but always-empty field, almost certainly Reference Pool ID. Token 111 is real and populated (1,353 of 200k rows in 2012Q1; 4,120 of 300k in 2016Q1; 5,921 of 300k in 2018Q1), matching the position `schema.py` already names Origination Classic FICO. Tokens 112 and 113 are empty in every row inspected, so 112-fields-plus-trailing-delimiter and 113-fields cannot be distinguished from content. Guessing would fabricate the data contract every later phase is validated against. | 2026-09-17 | open, blocks real-data ingestion |
-| `features/macro.py` sits at 56 percent coverage. `fred_initial_release_parameters` and `parse_fred_initial_releases` are untested, so the code that decides each macro value's AVAILABLE_DATE from the FRED response has no test. Leakage control 3 validates the join, not the ingestion that feeds it, because the test builds its own vintage frame. A parser bug would leave the macro-lag test green while real data leaked. | 2026-09-17 | open, close before Phase 5 |
+| `features/macro.py` sat at 56 percent coverage with the FRED ingestion path untested, so a parser bug could have left the macro-lag test green while real data leaked. | 2026-09-17 | resolved, 86 percent, ingestion and join now tested as one path and verified by mutation |
 | ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
 | No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green, now at `b61bbdc` after the history rewrite |
@@ -387,3 +387,46 @@ Token 111 is real and increasingly populated in later vintages, matching the pos
 **Repo review, section 10, ten points:** clean, 10/10, unchanged in substance. Specifically on point 2, 45.5 GB now sits under `data/` and none of it is tracked; `git check-ignore` was run against the new files rather than assumed, and `git status` is clean.
 
 **Next action:** obtain the current Fannie Mae file layout and glossary from Data Dynamics under Resources, which is a human step behind the same login. Then amend ADR-004, extend `SUPPORTED_FIELD_COUNTS`, encode positions 109 to 113, and re-run Bronze and Silver against real data.
+
+---
+
+### 2026-09-17, closing the macro ingestion coverage gap
+
+**What I set out to do:** close the gap recorded at the Phase 4 boundary, where `features/macro.py` sat at 56 percent and the untested part was the FRED ingestion path that decides each macro value's `AVAILABLE_DATE`. This is Phase 4 remedial work, not the start of Phase 5.
+
+**Why it mattered:** leakage control 3 proves the join honours `AVAILABLE_DATE`, but the test builds its own vintage frame, so it never exercised the parser producing those dates. A bug there would have left the macro-lag test green while real data leaked. The guarantee was thinner than it looked.
+
+**What I actually did:** added `tests/unit/test_macro_ingestion.py`, seventeen tests over `fred_initial_release_parameters` and `parse_fred_initial_releases`, and added `test_parsed_fred_releases_respect_publication_lag_end_to_end` to the leakage suite, which runs a realistic FRED payload through the parser into the join.
+
+The tests that matter most:
+
+- `output_type` must be `"4"`, which is what makes FRED return unrevised first prints. Any other value returns the series as later revised, and the request still succeeds with plausible numbers, so nothing else would catch it.
+- The real-time window must stay `1776-07-04` to `9999-12-31`. Narrowing it drops early releases and leaves only revisions, the same failure by a different route.
+- `available_date` must come from `realtime_start`, not from `date`. US unemployment for September 2015 was published in October 2015; taking the observation month would make it knowable during September.
+- A same-day release, as the weekly mortgage rate is, must survive unchanged. The rule is that availability is read from the release date, not that a lag is imposed.
+- A missing `realtime_start` is rejected rather than defaulted, because without a release date there is no basis for availability.
+- FRED's `"."` missing marker is skipped rather than coerced, so no fabricated macro reading enters the panel.
+
+**Verified the guards actually fail.** Rather than trusting that the tests were meaningful, I mutated `parse_fred_initial_releases` to take `available_date` from the observation month and reran them:
+
+| Test | Under mutation |
+| --- | --- |
+| `test_available_date_is_the_release_date_not_the_observation_month` | failed, as required |
+| `test_parsed_fred_releases_respect_publication_lag_end_to_end` | failed, as required |
+| `test_same_day_release_is_preserved_rather_than_forced_to_lag` | passed, correctly |
+
+The third is the informative one. For `MORTGAGE30US` the observation date and release date are the same day, so the mutation cannot change it. The guards are specific to the real defect rather than broadly sensitive to any change. `macro.py` was restored with `git checkout` and confirmed clean before the gate ran.
+
+**What works now, with evidence:** full container gate green, `make docker-check` exit 0. Ruff clean, 47 files formatted, mypy clean on 34 source files, **74 passed in 628.48 seconds, 89.92 percent total coverage**. `features/macro.py` moved from 56 to 86 percent, with the remaining uncovered lines being argument-validation branches rather than the vintage logic.
+
+**What is broken or incomplete:** nothing in this work. The schema width question from the previous entry still blocks real-data ingestion and is now the only thing blocking progress.
+
+**Decisions made and why:** none, no ADR warranted. This closes a known gap against an existing requirement rather than choosing between options.
+
+**Results produced:** none. Coverage is an engineering measure, not a model result, so the ledger stays empty.
+
+**Surprises, dead ends, and what I learned from them:** the mutation check was worth more than the tests it validated. It turned "these tests look right" into evidence, and the one test that correctly kept passing showed the suite is discriminating rather than merely sensitive. Worth repeating for any test whose whole purpose is to catch a silent failure.
+
+**Repo review, section 10, ten points:** clean, 10/10. Of note on point 2, 45.5 GB of raw data now sits on disk and none of it is tracked; point 3 was checked for leftover mutation markers and diagnostic scripts, and none remain.
+
+**Next action:** unchanged. Obtain the current Fannie Mae file layout, amend ADR-004, extend `SUPPORTED_FIELD_COUNTS`, and re-run Bronze and Silver on real data.
