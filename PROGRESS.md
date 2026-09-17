@@ -12,8 +12,8 @@ Update these four lines at the end of every session. They are the first thing re
 
 - Current phase: 4 complete. Phase 5 not started.
 - Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
-- Blocked on: nothing blocks starting Phase 5 mechanically, but the six Fannie Mae quarterly files still require a human download. Phase 5 is the first phase that produces headline numbers, and numbers fitted to synthetic data cannot enter the results ledger.
-- Next action: close the macro ingestion coverage gap recorded below, then download the six files named in `data/README.md` before training anything whose output is meant to be cited.
+- Blocked on: the raw files are present but their layout has 113 pipe-separated tokens, and `SUPPORTED_FIELD_COUNTS` accepts only 108 or 110. Real-data ingestion cannot run until the current Fannie Mae file layout document confirms whether that is 112 fields plus a trailing delimiter or 113 fields. Obtaining that document is a human step behind the same login.
+- Next action: obtain the current file layout and glossary from Fannie Mae Data Dynamics, amend ADR-004, extend the schema, then re-run Bronze and Silver on real data.
 
 ---
 
@@ -54,6 +54,7 @@ Things that are unresolved and will bite later if forgotten.
 
 | Item | Raised | Status |
 | --- | --- | --- |
+| Raw files carry 113 pipe-separated tokens; the Phase 1 contract accepts 108 or 110. Token 1 is a real but always-empty field, almost certainly Reference Pool ID. Token 111 is real and populated (1,353 of 200k rows in 2012Q1; 4,120 of 300k in 2016Q1; 5,921 of 300k in 2018Q1), matching the position `schema.py` already names Origination Classic FICO. Tokens 112 and 113 are empty in every row inspected, so 112-fields-plus-trailing-delimiter and 113-fields cannot be distinguished from content. Guessing would fabricate the data contract every later phase is validated against. | 2026-09-17 | open, blocks real-data ingestion |
 | `features/macro.py` sits at 56 percent coverage. `fred_initial_release_parameters` and `parse_fred_initial_releases` are untested, so the code that decides each macro value's AVAILABLE_DATE from the FRED response has no test. Leakage control 3 validates the join, not the ingestion that feeds it, because the test builds its own vintage frame. A parser bug would leave the macro-lag test green while real data leaked. | 2026-09-17 | open, close before Phase 5 |
 | ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
@@ -340,3 +341,49 @@ The fix is structural rather than a patched exclusion list. `OUTCOME_COLUMNS` no
 **Repo review, section 10, ten points:** clean, 10/10. No generated artefacts or data tracked; no dead files; all 23 `src` modules reached by tests or siblings; no empty directories; 10 of 14 section 9 directories present, with `dags/`, `governance/`, `dashboards/` and `infra/` still owned by later phases; no notebooks committed; every declared dependency used, `hypothesis` now genuinely so; naming snake_case throughout; working tree staged and clean.
 
 **Next action:** close the macro ingestion coverage gap, then obtain the six Fannie Mae files before Phase 5 trains anything whose output is meant to be cited.
+
+---
+
+### 2026-09-17, raw data placed and a schema mismatch found
+
+**What I set out to do:** move the six downloaded Fannie Mae files into `data/raw/`, record their hashes, and confirm they match the Phase 1 contract.
+
+**What I actually did:** found all six archives in `Downloads`, verified before extracting that each contained exactly one correctly-named CSV and that 45.5 GB would fit in 500 GB free. Extracted them to `data/raw/`; no renaming was needed because the archive entries already carried the manifest filenames. Confirmed `git check-ignore` resolves each file to `.gitignore:53`, `data/*`, and that the working tree stayed clean, so none of this can reach the repository. Then inspected the format rather than assuming it.
+
+**SHA-256 of the raw files, as required by Phase 1:**
+
+| File | Size | SHA-256 |
+| --- | --- | --- |
+| `2005Q1.csv` | 6.15 GB | `342d8049441e0cac1de435069f740d56b969a77de0c7b5f4612fa9afdac4cd71` |
+| `2005Q3.csv` | 8.97 GB | `9cf06c554a5766c8d760e626a190db68a1571a6d1a4a5d420dfb055b7793c722` |
+| `2007Q1.csv` | 4.21 GB | `6d352fa421713ae1ee9133c633aba2f62af0855e4ea35619686c4cb5f4ac2573` |
+| `2012Q1.csv` | 12.90 GB | `3e4928f155e7571da8f92116280dd2800e51fc71cf6c82265b50fb510b8a8f07` |
+| `2016Q1.csv` | 6.84 GB | `ce2551185c5e05f63545d72d99f9a6cf1de16e130c0b534eee8f5fb07809864c` |
+| `2018Q1.csv` | 6.45 GB | `b89043e7c2967d8f50bb3d7f5f694ee624a77ec86e9390a6333ee9ccf5ed3ebe` |
+
+**The finding: the real files do not match the encoded schema.** Every line carries 113 pipe-separated tokens. `SUPPORTED_FIELD_COUNTS` accepts 108 or 110 only.
+
+Scanning roughly 1.1 million rows across four vintages gives a completely consistent shape:
+
+| Token | 2005Q1 | 2012Q1 | 2016Q1 | 2018Q1 |
+| --- | --- | --- | --- | --- |
+| 1 | always empty | always empty | always empty | always empty |
+| 111 | always empty | 1,353 of 200k populated | 4,120 of 300k populated | 5,921 of 300k populated |
+| 112 | always empty | always empty | always empty | always empty |
+| 113 | always empty | always empty | always empty | always empty |
+
+Token 1 is a real field that happens to be blank, almost certainly Reference Pool ID, which is populated only for CRT deals. The following tokens read as loan identifier, monthly reporting period, channel `C`, then seller name, which is the documented order and confirms token 1 is not a wrapper artefact.
+
+Token 111 is real and increasingly populated in later vintages, matching the position `schema.py` line 29 already names "Origination Classic FICO". That is the confirmation ADR-004 was explicitly waiting for when it said positions 111 to 114 are not accepted as raw-file columns until the sample file or official importer confirms the shape.
+
+**What is broken or incomplete:** whether the layout is 112 fields plus a trailing delimiter, or 113 fields with the last two unpopulated in every vintage held, cannot be decided from content. A record ending in a delimiter and a record whose final field is empty are byte-identical. Resolving it by guess would fabricate the data contract that every later phase is validated against, and an off-by-one would shift every column silently while still parsing. Real-data Bronze and Silver runs are therefore blocked, as is the Phase 2 real-data DQ evidence.
+
+**Decisions made and why:** none. No ADR yet, because the schema decision cannot be made without the layout document. ADR-004 will need amending once it is available; that amendment is the decision, and making it now would be guesswork dressed as a record.
+
+**Results produced:** none. The hashes above are provenance, not metrics, so the ledger stays empty.
+
+**Surprises, dead ends, and what I learned from them:** the working assumption had been that the files would arrive in the 108-field public sample shape or the 110-field importer shape, and ADR-004 hedged against exactly this. The hedge paid off: because the supported counts were explicit and validated, the mismatch surfaced as a contract question in minutes rather than as silently misaligned columns in Silver. A schema that fails loudly on an unexpected width is worth more than one that tolerates it.
+
+**Repo review, section 10, ten points:** clean, 10/10, unchanged in substance. Specifically on point 2, 45.5 GB now sits under `data/` and none of it is tracked; `git check-ignore` was run against the new files rather than assumed, and `git status` is clean.
+
+**Next action:** obtain the current Fannie Mae file layout and glossary from Data Dynamics under Resources, which is a human step behind the same login. Then amend ADR-004, extend `SUPPORTED_FIELD_COUNTS`, encode positions 109 to 113, and re-run Bronze and Silver against real data.
