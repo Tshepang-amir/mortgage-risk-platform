@@ -23,6 +23,7 @@ dev = [
   "mypy>=1.18",
   "pytest>=8.4",
   "pytest-cov>=7.0",
+  "hypothesis>=6,<7",
   "pre-commit>=4.3",
   "detect-secrets>=1.5",
 ]

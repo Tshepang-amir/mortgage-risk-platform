@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 3, blocked on the real-data download. Phase 2 is complete.
-- Last completed exit criterion: Phase 2. Bronze replay is idempotent, Silver is typed and deduplicated, code labels and the SCD Type 2 servicer dimension are built, and the Great Expectations gate passes on synthetic data. Full Docker check passed on 2026-09-16: Ruff clean, mypy clean, pytest 45 passed with 92.00 percent coverage.
-- Blocked on: the six Fannie Mae quarterly files still require a human download before the Phase 3 golden-record test can run.
-- Next action: download the six files named in `data/README.md`, record their SHA-256 hashes, then reproduce Fannie Mae published summary figures from Silver for Phase 3.
+- Current phase: 4 complete. Phase 5 not started.
+- Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
+- Blocked on: nothing blocks starting Phase 5 mechanically, but the six Fannie Mae quarterly files still require a human download. Phase 5 is the first phase that produces headline numbers, and numbers fitted to synthetic data cannot enter the results ledger.
+- Next action: close the macro ingestion coverage gap recorded below, then download the six files named in `data/README.md` before training anything whose output is meant to be cited.
 
 ---
 
@@ -24,8 +24,8 @@ Update these four lines at the end of every session. They are the first thing re
 | 0 | Foundation | complete | 2026-09-15 |
 | 1 | Data contracts and synthetic generator | complete | 2026-09-15 |
 | 2 | Bronze and Silver | complete | 2026-09-16 |
-| 3 | Golden-record test | not started | |
-| 4 | Gold panel | not started | |
+| 3 | Golden-record test | complete | 2026-09-17 |
+| 4 | Gold panel | complete | 2026-09-17 |
 | 5 | Baselines and scorecard | not started | |
 | 6 | Challenger model | not started | |
 | 7 | Validation pack | not started | |
@@ -54,6 +54,8 @@ Things that are unresolved and will bite later if forgotten.
 
 | Item | Raised | Status |
 | --- | --- | --- |
+| `features/macro.py` sits at 56 percent coverage. `fred_initial_release_parameters` and `parse_fred_initial_releases` are untested, so the code that decides each macro value's AVAILABLE_DATE from the FRED response has no test. Leakage control 3 validates the join, not the ingestion that feeds it, because the test builds its own vintage frame. A parser bug would leave the macro-lag test green while real data leaked. | 2026-09-17 | open, close before Phase 5 |
+| ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
 | No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green, now at `b61bbdc` after the history rewrite |
 | WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | resolved by containerised Spark in ADR-005 |
@@ -296,3 +298,45 @@ Phase 0's exit criterion is therefore evidenced at run level rather than by badg
 **Repo review, section 10, ten points:** clean, 10/10. No raw data, downloaded PDFs, ZIPs, Spark output or generated artefacts are tracked; `data/` still tracks only its README; the new module is imported and exercised by tests; no dependency was added; `tests/golden/` now matches the required section 9 layout; naming is snake_case; the non-obvious population decision has an ADR; notebook state is unchanged; `git diff --check` is clean; and the working tree contains only intended Phase 3 changes before commit.
 
 **Next action:** Phase 4, constructing the Gold survival panel on synthetic Silver first. When the six human-downloaded files arrive, record their hashes and rerun the existing Bronze/Silver DQ path, but do not compare their subset aggregates with the incompatible full-book publication.
+
+---
+
+### 2026-09-17, Phase 4 boundary: exit criterion met
+
+**What I set out to do:** find the true state of Phase 4, fix whatever was failing, and meet the exit criterion: all three leakage tests pass, and panel rows reconcile to loan counts times observed months.
+
+**What I found on arrival:** 709 lines of Gold-panel work uncommitted across `data/gold.py`, `features/macro.py`, `validation/splits.py` and `config/gold.py`, with `hypothesis` added to `pyproject.toml` but unused. `make check` failed at `ruff format`, and because the gate chains on `&&`, mypy and pytest had never run against any of it. None of the three leakage tests existed. The phase table and current-state block both still said Phase 3 was "not started" even though the 2026-09-17 entry above closes it; the living blocks had not been updated at the end of that session.
+
+**What I actually did:** added a `docker-format` target, since the native `format` target cannot run on this host for the reasons in ADR-003. Reformatted three files. Fixed a genuine mypy failure in `macro.py` that the lint failure had been masking: `expressions` needed an explicit `list[Column]` annotation. Wrote `tests/property/test_leakage.py`, which creates the `tests/property/` directory section 9 requires and makes the `hypothesis` dependency legitimate rather than unused.
+
+**The leakage tests found a real exposure.** Withholding rows after a cutoff changed three columns that were neither labels nor obviously outcomes:
+
+| Column | Full build | Rows after cutoff withheld |
+| --- | --- | --- |
+| `SOURCE_OBSERVED_MONTHS` | 12 | 2 |
+| `EXIT_DATE` | 2016-05-01 | null |
+| `EXIT_TYPE` | `default` | `right_censored` |
+
+All three are legitimate survival bookkeeping, and my first classification list missed them, so the initial failure was partly my own test being incomplete. The exposure it revealed is real regardless: nothing in the Gold schema separated them from features. `EXIT_TYPE` is a restatement of the answer and `SOURCE_OBSERVED_MONTHS` encodes how long the loan survived. A Phase 5 model selecting either would score near-perfectly and mean nothing, and that failure would look like success.
+
+The fix is structural rather than a patched exclusion list. `OUTCOME_COLUMNS` now lives in `config/gold.py` as one registry, and the test asserts a subset property: the set of columns whose values change under truncation must be contained in that registry. Any new column carrying lookahead fails the suite until someone classifies it deliberately. Recorded as ADR-007, including the honest note that the panel code was written before its guard, contrary to rule 2.
+
+**What works now, with evidence:** full container gate green on 2026-09-17, `make docker-check` exit 0. Because the gate chains on `&&`, pytest running at all proves Ruff check, Ruff format and mypy all passed. **56 passed in 585.65 seconds, 86.17 percent coverage** against a 70 percent floor. The eight leakage tests are:
+
+- `test_only_classified_outcome_columns_depend_on_future_rows` and `test_temporal_invariance_holds_at_any_cutoff`, a Hypothesis property over four cutoffs, for control 1
+- `test_temporal_invariance_check_is_not_vacuous`, which fails if truncation stops changing anything, so control 1 cannot pass by comparing a panel with itself
+- `test_no_loan_is_both_training_and_out_of_vintage` and `test_split_integrity_rejects_a_loan_in_two_vintages` for control 2, the second being the negative case
+- `test_no_macro_value_postdates_its_observation_month` and `test_point_in_time_join_ignores_a_later_revision` for control 3, the second injecting a 2020 revision of a 2015 observation and asserting it never reaches a 2015 loan-month
+- `test_panel_rows_reconcile_to_at_risk_loan_months` for the second half of the exit criterion
+
+**What is broken or incomplete:** `features/macro.py` is at 56 percent coverage, and the untested part is the FRED ingestion path that decides each value's `AVAILABLE_DATE`. Leakage control 3 proves the join respects availability, but the test builds its own vintage frame, so it never exercises the parser that produces those dates from a real FRED response. A bug there would leave the macro-lag test green while real data leaked. Recorded in open questions and worth closing before Phase 5 consumes macro data in anger. The six Fannie Mae files are still absent, so every result so far is structural, not empirical.
+
+**Decisions made and why:** ADR-007, the outcome-column registry, chosen over a naming convention that nothing enforces and over splitting labels into a separate table, which would add a join to every training run and complicate the one-row-per-at-risk-loan-month reconciliation that is the point of the panel.
+
+**Results produced:** none. The ledger stays empty. Phase 5 produces the first headline numbers, and on synthetic data they would measure the generator rather than the mortgage market, so they must not be cited.
+
+**Surprises, dead ends, and what I learned from them:** a formatting failure hid a type error, which in an `&&` chain hid the entire test suite. A cheap failure at the front of a gate can conceal expensive ones behind it, and "lint is failing" is not a small problem when nothing after it has run. Separately, writing the invariance test as a subset assertion rather than a fixed exclusion list turned a one-off fix into a standing guard; the fixed list would have gone stale the first time someone added a column.
+
+**Repo review, section 10, ten points:** clean, 10/10. No generated artefacts or data tracked; no dead files; all 23 `src` modules reached by tests or siblings; no empty directories; 10 of 14 section 9 directories present, with `dags/`, `governance/`, `dashboards/` and `infra/` still owned by later phases; no notebooks committed; every declared dependency used, `hypothesis` now genuinely so; naming snake_case throughout; working tree staged and clean.
+
+**Next action:** close the macro ingestion coverage gap, then obtain the six Fannie Mae files before Phase 5 trains anything whose output is meant to be cited.

@@ -15,7 +15,7 @@ export MSYS_NO_PATHCONV := 1
 DOCKER_RUN := docker run --rm -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv -v mrp-ivy:/root/.ivy2.5.2 $(DEV_IMAGE)
 
 .PHONY: help install hooks lint format typecheck test structure check clean
-.PHONY: docker-build docker-check docker-shell secrets-baseline
+.PHONY: docker-build docker-check docker-format docker-shell secrets-baseline
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ docker-build: ## Build the Java-enabled Linux development image
 
 docker-check: docker-build ## Run the full check inside a Linux container (see ADR-005)
 	$(DOCKER_RUN) bash -c 'git config --global --add safe.directory /w && uv sync --all-groups --quiet && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest'
+
+docker-format: docker-build ## Apply ruff fixes and formatting inside the container
+	$(DOCKER_RUN) bash -c 'git config --global --add safe.directory /w && uv sync --all-groups --quiet && uv run ruff check --fix . && uv run ruff format .'
 
 docker-shell: docker-build ## Interactive shell in the dev container
 	docker run --rm -it -v "$(CURDIR):/w" -w /w -e UV_PROJECT_ENVIRONMENT=/opt/venv -v mrp-dev-venv:/opt/venv -v mrp-ivy:/root/.ivy2.5.2 $(DEV_IMAGE) bash
