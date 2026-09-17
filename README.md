@@ -4,8 +4,10 @@ Mortgage credit risk on Fannie Mae loan performance data: a discrete-time
 hazard probability-of-default model, an IFRS 9 expected credit loss layer, and
 a model validation pack of the kind a bank's model risk function would demand.
 
-**Status: Phase 2 of 11 complete.** Bronze and Silver data layers are
-implemented. No models have been trained and no results produced.
+**Status: Phase 3 of 11 complete.** Bronze and Silver data layers are
+implemented, and the Fannie Mae acquisition-summary calculation is covered by
+a population-safe golden-record check. No models have been trained and no
+results produced.
 This README is recruiter-facing and is written properly in Phase 11,
 once there are numbers to put at the top of it.
 
