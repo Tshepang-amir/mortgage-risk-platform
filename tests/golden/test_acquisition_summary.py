@@ -113,7 +113,7 @@ def _silver_fixture(spark: SparkSession) -> DataFrame:
             spark_types.StructField("DTI", spark_types.IntegerType(), False),
             spark_types.StructField("CSCORE_B", spark_types.IntegerType(), False),
             spark_types.StructField("CSCORE_C", spark_types.IntegerType(), True),
-            spark_types.StructField("_source_filename", spark_types.StringType(), False),
+            spark_types.StructField("_source_file", spark_types.StringType(), False),
         ]
     )
     return spark.createDataFrame(

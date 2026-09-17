@@ -213,12 +213,12 @@ def summarize_acquisition(silver: DataFrame) -> DataFrame:
 
 def observed_acquisition_quarters(silver: DataFrame) -> tuple[str, ...]:
     """Read acquisition-quarter scope from immutable Silver provenance."""
-    if "_source_filename" not in silver.columns:
-        raise ValueError("Silver data has no _source_filename provenance column")
+    if "_source_file" not in silver.columns:
+        raise ValueError("Silver data has no _source_file provenance column")
 
     quarters: set[str] = set()
-    for row in silver.select("_source_filename").distinct().collect():
-        source_filename = cast(str | None, row["_source_filename"])
+    for row in silver.select("_source_file").distinct().collect():
+        source_filename = cast(str | None, row["_source_file"])
         match = _QUARTER_PATTERN.fullmatch(source_filename or "")
         if match is None:
             raise ValueError(f"cannot derive acquisition quarter from {source_filename!r}")

@@ -10,6 +10,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import types as spark_types
 
 from mortgage_risk.data.bronze import ingest_bronze, read_bronze
+from mortgage_risk.data.golden import observed_acquisition_quarters
 from mortgage_risk.data.silver import publish_silver
 from mortgage_risk.data.synthetic import SyntheticPanel, write_synthetic_panel
 
@@ -71,6 +72,7 @@ def test_bronze_replay_and_silver_publication_are_idempotent(
     assert first_publish.quality.evaluated_expectations == 9
 
     silver = spark_session.read.format("delta").load(str(silver_path))
+    assert observed_acquisition_quarters(silver) == ("2005Q1",)
     assert isinstance(silver.schema["ACT_PERIOD"].dataType, spark_types.DateType)
     assert isinstance(silver.schema["ORIG_UPB"].dataType, spark_types.DecimalType)
     minimum_upb = silver.agg({"CURRENT_UPB": "min"}).first()
