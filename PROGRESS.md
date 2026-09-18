@@ -12,8 +12,8 @@ Update these four lines at the end of every session. They are the first thing re
 
 - Current phase: 4 complete. Phase 5 not started.
 - Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
-- Blocked on: `SELLER` and `SERVICER` exceed the `X(50)` max length Fannie Mae's own glossary publishes, in four of six vintages from 2007Q1 onward. Real-data ingestion stops on it. A full width scan of all 113 positions is running so the new bounds are set from evidence rather than by fixing one field at a time.
-- Next action: finish the width scan, write the ADR on how to treat fields that exceed their published length, then re-run Bronze and Silver on real data.
+- Blocked on: nothing. ADR-009 makes text length a reported quality signal rather than a parse failure, so real-data ingestion can proceed.
+- Next action: run Bronze on the six real files, aggregating per-field observed lengths in the same Spark pass so the two open schema questions are answered with evidence.
 
 ---
 
@@ -55,7 +55,9 @@ Things that are unresolved and will bite later if forgotten.
 | Item | Raised | Status |
 | --- | --- | --- |
 | Raw files carry 113 pipe-separated tokens; the Phase 1 contract accepted 108 or 110. | 2026-09-17 | resolved by ADR-008; the published sample proved there is no trailing delimiter, so 113 tokens are 113 fields |
-| `SELLER` and `SERVICER` exceed their published `X(50)` length in four of six vintages, observed up to 68 characters. Fannie Mae's data contradicts Fannie Mae's glossary. | 2026-09-18 | open, blocks real-data ingestion |
+| `SELLER` and `SERVICER` exceed their published `X(50)` length in four of six vintages, observed up to 68 characters. Fannie Mae's data contradicts Fannie Mae's glossary. | 2026-09-18 | resolved by ADR-009; text length is now reported to the quality gate, not fatal at parse |
+| Observed maxima for the other 37 text fields are unknown, so the quality gate has declared figures but no measured ones to compare against. A serial `awk` scan of all 113 positions was abandoned after roughly a day. | 2026-09-19 | open, answer from the Bronze Spark pass |
+| Numeric and date widths are declared in `raw_format`, for example `9(3)`, and enforced nowhere. A 40-digit credit score parses today and would reach Silver. Pre-dates ADR-009. Deliberately not closed without evidence, since an unevidenced width is what broke `SELLER`. | 2026-09-19 | open, answer from the Bronze Spark pass |
 | `features/macro.py` sat at 56 percent coverage with the FRED ingestion path untested, so a parser bug could have left the macro-lag test green while real data leaked. | 2026-09-17 | resolved, 86 percent, ingestion and join now tested as one path and verified by mutation |
 | ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
@@ -484,3 +486,33 @@ The more interesting result is that both defects were caught by the same mechani
 **Repo review, section 10, ten points:** clean, 10/10. Of note on point 2, 45.5 GB sits in `data/raw` and none of it is tracked; on point 3, the temporary validation script used against the real files was removed and checked for.
 
 **Next action:** finish the all-position width scan, write the ADR on how to treat fields that exceed their published length, apply it, then run Bronze and Silver on real data.
+
+---
+
+### 2026-09-19, text length reclassified as a quality signal
+
+**What I set out to do:** unblock real-data ingestion, which stopped because `SELLER` exceeds the `X(50)` length Fannie Mae's own glossary publishes.
+
+**A scan I abandoned, and why that was the useful part.** The plan recorded in the previous entry was to measure observed maxima for all 113 positions and set bounds from evidence. That scan ran for roughly a day and produced nothing: about 114 million rows times 113 field splits is order 10^10 string operations, single-threaded on NTFS. Killing it forced a better question. The problem was never that the bounds were wrong, it was that length was fatal at parse for a field no model consumes.
+
+**What I actually did:** separated structural validation from value-level quality. Field count stays fatal, because a lost delimiter yields 112 or 114 tokens and is caught precisely. Text length becomes an observation: `string_length_exceedances` returns `(column_name, declared_max, observed_length)` for the quality suite to gate on at the Bronze to Silver transition, which is where section 8 puts value-level checks. The glossary figures stay in the schema unchanged as the documented contract; we now record where reality departs from it rather than halting. Recorded as ADR-009.
+
+**A correction to my own ADR, made before committing it.** The first draft described the change as "fatal for typed fields, reported for text", implying a corruption guard was preserved. The test written to prove that claim failed, and the reason was that `max_length` is populated on **only the 39 text fields**. No `INTEGER`, `DECIMAL` or `MONTH` field declares one; numeric widths live in `raw_format` such as `9(3)` and are enforced nowhere. A 40-digit credit score parses today and did before this change. The type branch therefore guards a case that does not currently arise.
+
+ADR-009 now says so explicitly rather than quietly dropping the claim, and the options table was corrected for the same inconsistency. The test that caught it was kept as a characterisation test whose docstring states that enforcing numeric width should make it fail and require replacement, so that change is deliberate rather than accidental.
+
+**What I deliberately did not do:** close the numeric width gap. It is real. Imposing a width without evidence that real data respects it is exactly what produced the `SELLER` breakage this work exists to resolve. The Bronze run reads all six files in Spark and can aggregate per-field lengths in the same pass, answering both open questions with measurement instead of assumption.
+
+**What works now, with evidence:** full container gate green, Ruff clean, 49 files formatted, mypy clean on 34 source files, **85 passed in 587.35 seconds with 90.28 percent coverage**. New tests prove the real 68-character seller name parses, that it is still reported to the quality gate as `("SELLER", 50, 68)`, that conforming text reports nothing, and that a lost delimiter is still rejected on width.
+
+**What is broken or incomplete:** two open questions, both recorded above and both answerable from the Bronze pass. Observed maxima for the other 37 text fields are unknown, so the quality gate has declared figures but no measured ones. Numeric and date widths remain unenforced.
+
+**Decisions made and why:** ADR-009. Widening the two breached fields was rejected because it pins the contract to the longest lender name that happens to exist today and treats the symptom; quarantining breaching rows was rejected because it discards valid loans over a cosmetic field, which is being loud about the wrong thing.
+
+**Results produced:** none. The ledger stays empty until Phase 5.
+
+**Surprises, dead ends, and what I learned from them:** two mistakes, both mine, both caught by the process rather than by luck. The day-long scan was the wrong instrument for the question, and the question itself was wrong. The ADR overclaimed, and the test written to demonstrate the claim is what exposed it. Writing the test before trusting the reasoning is what turned a plausible-sounding record into an accurate one.
+
+**Repo review, section 10, ten points:** clean, 10/10. The abandoned scan left a zero-byte `widths.tsv` in the scratch directory outside the repository, not in it, and nothing untracked remains in the working tree.
+
+**Next action:** run Bronze on the six real files, aggregating per-field observed lengths in the same Spark pass.

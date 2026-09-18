@@ -1258,10 +1258,35 @@ def validate_raw_values(values: Sequence[str], field_count: int = SAMPLE_FILE_FI
         _validate_field_value(field, value)
 
 
+def string_length_exceedances(
+    values: Sequence[str], field_count: int = SAMPLE_FILE_FIELD_COUNT
+) -> tuple[tuple[str, int, int], ...]:
+    """Report text fields longer than the glossary declares.
+
+    Returned as (column_name, declared_max, observed_length) for the data
+    quality suite to gate on. These are observations, not parse failures: see
+    ADR-009 for why an over-long name does not invalidate a record.
+    """
+    exceedances: list[tuple[str, int, int]] = []
+    for field, value in zip(fields_for_count(field_count), values, strict=True):
+        if field.field_type is not FieldType.STRING or field.max_length is None:
+            continue
+        if value and len(value) > field.max_length:
+            exceedances.append((field.column_name, field.max_length, len(value)))
+    return tuple(exceedances)
+
+
 def _validate_field_value(field: FieldDefinition, value: str) -> None:
     if value == "":
         return
-    if field.max_length is not None and len(value) > field.max_length:
+    # Length is fatal only where exceeding it means the row is misaligned. A
+    # 40-character FICO is corruption; a 68-character seller name is Fannie
+    # Mae's published length being out of date. ADR-009.
+    if (
+        field.max_length is not None
+        and field.field_type is not FieldType.STRING
+        and len(value) > field.max_length
+    ):
         raise SchemaValidationError(
             f"{field.column_name} exceeds max length {field.max_length}: {value!r}"
         )
