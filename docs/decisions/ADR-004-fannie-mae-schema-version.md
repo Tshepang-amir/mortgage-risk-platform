@@ -1,6 +1,6 @@
 # ADR-004: Fannie Mae Schema Version
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR-008, which accepts the 113-field width after the sample file and glossary confirmed it
 - **Date:** 2026-09-15
 - **Phase:** 1
 

@@ -12,8 +12,8 @@ Update these four lines at the end of every session. They are the first thing re
 
 - Current phase: 4 complete. Phase 5 not started.
 - Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
-- Blocked on: the raw files are present but their layout has 113 pipe-separated tokens, and `SUPPORTED_FIELD_COUNTS` accepts only 108 or 110. Real-data ingestion cannot run until the current Fannie Mae file layout document confirms whether that is 112 fields plus a trailing delimiter or 113 fields. Obtaining that document is a human step behind the same login.
-- Next action: obtain the current file layout and glossary from Fannie Mae Data Dynamics, amend ADR-004, extend the schema, then re-run Bronze and Silver on real data. The macro ingestion gap is closed, so this schema question is the only thing blocking progress.
+- Blocked on: `SELLER` and `SERVICER` exceed the `X(50)` max length Fannie Mae's own glossary publishes, in four of six vintages from 2007Q1 onward. Real-data ingestion stops on it. A full width scan of all 113 positions is running so the new bounds are set from evidence rather than by fixing one field at a time.
+- Next action: finish the width scan, write the ADR on how to treat fields that exceed their published length, then re-run Bronze and Silver on real data.
 
 ---
 
@@ -54,7 +54,8 @@ Things that are unresolved and will bite later if forgotten.
 
 | Item | Raised | Status |
 | --- | --- | --- |
-| Raw files carry 113 pipe-separated tokens; the Phase 1 contract accepts 108 or 110. Token 1 is a real but always-empty field, almost certainly Reference Pool ID. Token 111 is real and populated (1,353 of 200k rows in 2012Q1; 4,120 of 300k in 2016Q1; 5,921 of 300k in 2018Q1), matching the position `schema.py` already names Origination Classic FICO. Tokens 112 and 113 are empty in every row inspected, so 112-fields-plus-trailing-delimiter and 113-fields cannot be distinguished from content. Guessing would fabricate the data contract every later phase is validated against. | 2026-09-17 | open, blocks real-data ingestion |
+| Raw files carry 113 pipe-separated tokens; the Phase 1 contract accepted 108 or 110. | 2026-09-17 | resolved by ADR-008; the published sample proved there is no trailing delimiter, so 113 tokens are 113 fields |
+| `SELLER` and `SERVICER` exceed their published `X(50)` length in four of six vintages, observed up to 68 characters. Fannie Mae's data contradicts Fannie Mae's glossary. | 2026-09-18 | open, blocks real-data ingestion |
 | `features/macro.py` sat at 56 percent coverage with the FRED ingestion path untested, so a parser bug could have left the macro-lag test green while real data leaked. | 2026-09-17 | resolved, 86 percent, ingestion and join now tested as one path and verified by mutation |
 | ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
@@ -430,3 +431,56 @@ The third is the informative one. For `MORTGAGE30US` the observation date and re
 **Repo review, section 10, ten points:** clean, 10/10. Of note on point 2, 45.5 GB of raw data now sits on disk and none of it is tracked; point 3 was checked for leftover mutation markers and diagnostic scripts, and none remain.
 
 **Next action:** unchanged. Obtain the current Fannie Mae file layout, amend ADR-004, extend `SUPPORTED_FIELD_COUNTS`, and re-run Bronze and Silver on real data.
+
+---
+
+### 2026-09-18, schema width resolved: the layout is 113 fields
+
+**What I set out to do:** resolve the blocker from the previous entry, where the real files carried 113 pipe-separated tokens and the contract accepted 108 or 110. The previous entry recorded this as a human step behind the Data Dynamics login. That was wrong, and testing the assumption before asking for help was worth the few minutes it took.
+
+**What I actually did:** the file layout and glossary are published openly, outside the login that gates the data itself. Retrieved both the glossary spreadsheet and the public sample file directly.
+
+**How the ambiguity was settled.** The open question was whether 113 tokens meant 113 fields or 112 fields followed by a trailing delimiter, which are byte-indistinguishable. The published sample answers it: it yields exactly 108 tokens against a documented 108-field layout. A trailing delimiter would make that 109. Fannie Mae writes none, so token count is field count and the real files hold 113 fields.
+
+The glossary then names all 114 documented positions, and every prediction from the raw scan held:
+
+| Position | Field | Observed in our files |
+| --- | --- | --- |
+| 1 | Reference Pool ID | present, empty throughout, consistent with non-CRT loans |
+| 109 | Payment Deferral Modification Event Indicator | present |
+| 110 | Interest Bearing UPB | present |
+| 111 | Origination Classic FICO | present and populated, rising by vintage |
+| 112 | Issuance Classic FICO | present, empty throughout |
+| 113 | Current Classic FICO | present, empty throughout |
+| 114 | Origination VantageScore 4.0 | not emitted |
+
+The raw-data observations were made before the glossary was read, so the agreement is corroboration rather than confirmation bias. The glossary also carries `Type` and `Max Length` columns, which independently confirm positions 111 to 113 as `9(3)` numeric, matching how they were typed.
+
+**What works now, with evidence:** `CURRENT_FILE_FIELD_COUNT = 113` added to `SUPPORTED_FIELD_COUNTS`, positions 111 to 113 encoded as `ORIG_CLASSIC_FICO`, `ISSUANCE_CLASSIC_FICO` and `CURRENT_CLASSIC_FICO`, and position 114 still refused. Full container gate green: Ruff clean, 48 files formatted, mypy clean on 34 source files, **79 passed in 397.95 seconds with 90.13 percent coverage**.
+
+The schema was then run against the real downloads rather than only against tests. All six files parse at 113 fields, which is the evidence that matters.
+
+**What is broken or incomplete:** that real-data run surfaced a second defect. `SELLER` is published as `X(50)` and the data exceeds it. A full scan of all 45.5 GB gives observed maxima by vintage:
+
+| Vintage | SELLER | SERVICER |
+| --- | --- | --- |
+| 2005Q1 | 41 | 42 |
+| 2005Q3 | 41 | 43 |
+| 2007Q1 | 52 | 42 |
+| 2012Q1 | 58 | 41 |
+| 2016Q1 | 68 | 52 |
+| 2018Q1 | 66 | 66 |
+
+Four of six vintages breach the published length, from 2007Q1 onward, so this is a long-standing divergence between Fannie Mae's data and Fannie Mae's documentation, not a recent anomaly. Real-data ingestion stops here. A scan of all 113 positions is running so the new bounds come from evidence rather than from fixing one field at a time and discovering the next one partway through a multi-hour Bronze run.
+
+**Decisions made and why:** ADR-008, adopt the 113-field width, amending but not superseding ADR-004. Position 114 stays refused on ADR-004's own grounds: it appears in no file we hold, so accepting it would make validation reject every real record. Recorded explicitly in the ADR is that Fannie Mae publishes no short column name for positions 111 to 113, so those three names are ours, derived from glossary labels, and are not official identifiers.
+
+**Results produced:** none. Schema work produces no metrics and the ledger stays empty.
+
+**Surprises, dead ends, and what I learned from them:** the previous entry asserted that obtaining the layout needed the human, and that assertion was never tested. It was wrong, and it would have idled the project waiting on something I could fetch myself. Worth checking whether a stated blocker is real before handing it over.
+
+The more interesting result is that both defects were caught by the same mechanism. ADR-004 refused to accept unconfirmed field positions, and the schema declares a max length per field. Without the first, positions 109 onward would have silently misaligned; without the second, seller names would have been truncated or accepted into Silver unnoticed. A contract that fails loudly on an unexpected shape turned two real defects into two clear errors in an afternoon.
+
+**Repo review, section 10, ten points:** clean, 10/10. Of note on point 2, 45.5 GB sits in `data/raw` and none of it is tracked; on point 3, the temporary validation script used against the real files was removed and checked for.
+
+**Next action:** finish the all-position width scan, write the ADR on how to treat fields that exceed their published length, apply it, then run Bronze and Silver on real data.

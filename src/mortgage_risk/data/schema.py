@@ -22,13 +22,17 @@ SCHEMA_SOURCE_URL: Final = (
 SCHEMA_SOURCE_DATE: Final = "2026-09-10"
 SAMPLE_FILE_FIELD_COUNT: Final = 108
 OFFICIAL_R_IMPORT_FIELD_COUNT: Final = 110
+# Width actually emitted by the quarterly Primary files, confirmed against the
+# real 2005Q1 to 2018Q1 downloads and the published glossary. See ADR-008.
+CURRENT_FILE_FIELD_COUNT: Final = 113
 LATEST_GLOSSARY_POSITION_COUNT: Final = 114
-SUPPORTED_FIELD_COUNTS: Final = (SAMPLE_FILE_FIELD_COUNT, OFFICIAL_R_IMPORT_FIELD_COUNT)
+SUPPORTED_FIELD_COUNTS: Final = (
+    SAMPLE_FILE_FIELD_COUNT,
+    OFFICIAL_R_IMPORT_FIELD_COUNT,
+    CURRENT_FILE_FIELD_COUNT,
+)
 FORWARD_GLOSSARY_FIELDS: Final[Mapping[int, str]] = MappingProxyType(
     {
-        111: "Origination Classic FICO",
-        112: "Issuance Classic FICO",
-        113: "Current Classic FICO",
         114: "Origination VantageScore 4.0",
     }
 )
@@ -1162,6 +1166,36 @@ _SCHEMA_ROWS: Final[tuple[SchemaRow, ...]] = (
         None,
         2,
         False,
+    ),
+    (
+        111,
+        "Origination Classic FICO",
+        "ORIG_CLASSIC_FICO",
+        FieldType.INTEGER,
+        "9(3)",
+        None,
+        0,
+        True,
+    ),
+    (
+        112,
+        "Issuance Classic FICO",
+        "ISSUANCE_CLASSIC_FICO",
+        FieldType.INTEGER,
+        "9(3)",
+        None,
+        0,
+        True,
+    ),
+    (
+        113,
+        "Current Classic FICO",
+        "CURRENT_CLASSIC_FICO",
+        FieldType.INTEGER,
+        "9(3)",
+        None,
+        0,
+        True,
     ),
 )
 FANNIE_MAE_FIELDS: Final[tuple[FieldDefinition, ...]] = tuple(
