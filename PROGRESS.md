@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 4 complete. Phase 5 not started.
-- Last completed exit criterion: Phase 4. All three leakage tests pass and panel rows reconcile to at-risk loan-months. Full Docker check passed on 2026-09-17: Ruff clean, mypy clean, pytest 56 passed in 585.65 seconds with 86.17 percent coverage.
-- Blocked on: nothing. ADR-009 makes text length a reported quality signal rather than a parse failure, so real-data ingestion can proceed.
-- Next action: run Bronze on the six real files, aggregating per-field observed lengths in the same Spark pass so the two open schema questions are answered with evidence.
+- Current phase: 5 in progress. The model stack is implemented and tested; the real-data exit run is outstanding.
+- Last completed exit criterion: Phase 4. Phase 5 engineering gate passed on 2026-09-21: Ruff clean, 59 files formatted, mypy clean on 42 source files, pytest 92 passed in 535.81 seconds with 88.75 percent coverage.
+- Blocked on: no real Bronze, Silver, Gold, or macro Delta data exists, `FRED_API_KEY` is unset, and no MLflow tracking URI is configured. Synthetic metrics are not exit evidence.
+- Next action: build the real medallion tables and point-in-time macro data, then run Phase 5 against an explicit Gold Delta version and require the clustered Gini-improvement interval to clear zero.
 
 ---
 
@@ -26,7 +26,7 @@ Update these four lines at the end of every session. They are the first thing re
 | 2 | Bronze and Silver | complete | 2026-09-16 |
 | 3 | Golden-record test | complete | 2026-09-17 |
 | 4 | Gold panel | complete | 2026-09-17 |
-| 5 | Baselines and scorecard | not started | |
+| 5 | Baselines and scorecard | in progress | |
 | 6 | Challenger model | not started | |
 | 7 | Validation pack | not started | |
 | 8 | IFRS 9 ECL layer | not started | |
@@ -59,7 +59,7 @@ Things that are unresolved and will bite later if forgotten.
 | Observed maxima for the other 37 text fields are unknown, so the quality gate has declared figures but no measured ones to compare against. A serial `awk` scan of all 113 positions was abandoned after roughly a day. | 2026-09-19 | open, answer from the Bronze Spark pass |
 | Numeric and date widths are declared in `raw_format`, for example `9(3)`, and enforced nowhere. A 40-digit credit score parses today and would reach Silver. Pre-dates ADR-009. Deliberately not closed without evidence, since an unevidenced width is what broke `SELLER`. | 2026-09-19 | open, answer from the Bronze Spark pass |
 | `features/macro.py` sat at 56 percent coverage with the FRED ingestion path untested, so a parser bug could have left the macro-lag test green while real data leaked. | 2026-09-17 | resolved, 86 percent, ingestion and join now tested as one path and verified by mutation |
-| ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | open, Phase 5 |
+| ADR-007 leaves identifiers and split columns unclassified. They are temporally invariant so they pass the leakage test, but they are not model features either. Phase 5 must select features positively rather than taking everything that is not an outcome. | 2026-09-17 | resolved by ADR-010 and the positive seven-feature contract |
 | PROJECT.md was empty on disk (0 bytes), so Phase 0 could not start. | 2026-09-15 | resolved, content supplied same day |
 | No GitHub remote exists. Phase 0's exit criterion requires CI green on first push. | 2026-09-15 | resolved, remote created and CI green, now at `b61bbdc` after the history rewrite |
 | WSL2 has no Linux distribution, only the internal `docker-desktop` one. PROJECT.md section 10 requires Spark to run in WSL2, so Phase 2 is blocked unless a distribution is installed or Spark runs in a container instead. Installing one on an Intune-managed device may need IT approval. | 2026-09-15 | resolved by containerised Spark in ADR-005 |
@@ -79,6 +79,11 @@ One line per ADR, pointing at the full record.
 | ADR-003 | Containerised development toolchain, because policy blocks local virtualenv execution | `docs/decisions/ADR-003-dev-environment.md` |
 | ADR-004 | Use the 108-field sample layout as the Phase 1 default while accepting the 110-field official R-importer extension | `docs/decisions/ADR-004-fannie-mae-schema-version.md` |
 | ADR-005 | Run local Spark and Delta Lake in a Java-enabled Linux container | `docs/decisions/ADR-005-containerised-spark-runtime.md` |
+| ADR-006 | Define the real-data golden-record population and published-summary tolerance | `docs/decisions/ADR-006-golden-record-population.md` |
+| ADR-007 | Separate future-dependent outcome columns from model features with an explicit registry | `docs/decisions/ADR-007-outcome-column-registry.md` |
+| ADR-008 | Adopt the confirmed 113-field current raw-file layout | `docs/decisions/ADR-008-current-file-width.md` |
+| ADR-009 | Treat published text length as a quality signal rather than a parse failure | `docs/decisions/ADR-009-text-length-is-a-quality-signal.md` |
+| ADR-010 | Use constrained OptBinning, deterministic loan sampling, and loan-clustered evaluation | `docs/decisions/ADR-010-scorecard-training-design.md` |
 
 ---
 
@@ -516,3 +521,26 @@ ADR-009 now says so explicitly rather than quietly dropping the claim, and the o
 **Repo review, section 10, ten points:** clean, 10/10. The abandoned scan left a zero-byte `widths.tsv` in the scratch directory outside the repository, not in it, and nothing untracked remains in the working tree.
 
 **Next action:** run Bronze on the six real files, aggregating per-field observed lengths in the same Spark pass.
+
+
+---
+
+### 2026-09-21, Phase 5 implementation complete; real-data exit outstanding
+
+**What I set out to do:** proceed from completed Phase 4 into the baselines and scorecard phase, including the marginal baseline, WOE scorecard, points scaling, discrete-time spline hazard, MLflow tracking, and bootstrap comparison required by `PROJECT.md`.
+
+**What I actually did:** locked OptBinning 0.21.0, MLflow 3.16.1, NumPy, Pandas, and scikit-learn. Added a smoothed marginal default-rate baseline by seasoning, a constrained seven-feature OptBinning scorecard scaled at 600 points / 50 odds / 20 PDO, and a logistic monthly hazard model with cubic loan-age splines. The hazard fit excludes the final right-censored month because its following month is not observed.
+
+Added deterministic whole-loan extraction from an explicit Gold Delta version, using 20 of 10,000 `xxhash64(LOAN_ID)` buckets by default. The trainer logs the Delta version, feature-list SHA-256, split contract and row counts, validation AUC/Gini, a paired loan-clustered bootstrap interval, three fitted models with signatures and input examples, and the detailed scorecard bin table. Added `docs/scorecard-methodology.md` and accepted ADR-010.
+
+**What works now, with evidence:** focused Phase 5 checks pass, including real OptBinning fitting, spline hazard prediction, deterministic clustered bootstrap, Spark Gold extraction, SQLite-backed MLflow tracking, model serialization, signatures, contracts, and scorecard artefacts. The full container gate is green: Ruff clean, 59 files formatted, mypy clean on 42 source files, and **92 tests passed in 535.81 seconds with 88.75 percent coverage**.
+
+**What is broken or incomplete:** Phase 5 is not closed. `data/raw` contains the six source files, but there is no `data/delta` or `data/external`, no real Gold Delta version, `FRED_API_KEY` is unset, and `MLFLOW_TRACKING_URI` is unset. The scorecard has therefore not been trained on real validation data, and no real bootstrap interval exists. The synthetic tracking test is implementation evidence only and its metrics are deliberately absent from the results ledger.
+
+**Decisions made and why:** ADR-010 chooses an established constrained-binning library instead of custom WOE arithmetic, positive feature selection instead of excluding known outcomes, deterministic loan-level sampling instead of random row sampling, and a paired loan-clustered bootstrap because loan-month rows are not independent. Cloudpickle is used for trusted MLflow model artefacts because OptBinning is not supported by the safer skops serializer.
+
+**Surprises, dead ends, and what I learned from them:** MLflow 3.16 rejects its legacy filesystem tracking backend by default, so the integration test now uses SQLite metadata and an isolated artifact root, matching the project's database-backed design. The first synthetic fixture accidentally made seasoning perfectly predict default; decorrelating those cycles exposed that a small synthetic sample did not clear a 95 percent interval. The test was corrected to verify interval tracking rather than manufacture statistical certainty. The Windows patch helper failed intermittently; one PowerShell fallback tuple was flattened and corrupted one new file, which Ruff caught immediately. The file was restored before any test or commit.
+
+**Results produced:** none. No synthetic AUC, Gini, or interval belongs in the ledger.
+
+**Next action:** execute Bronze, Silver, macro ingestion, and Gold publication on the real files, then call the Phase 5 trainer with the published Gold Delta version and the configured MLflow server. Close Phase 5 only if the scorecard's validation Gini improvement has a lower 95 percent loan-clustered bound above zero.

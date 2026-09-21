@@ -15,6 +15,11 @@ license = { text = "MIT" }
 dependencies = [
   "delta-spark>=4.0,<5",
   "great-expectations[spark]>=1.23,<2",
+  "mlflow>=3,<4",
+  "numpy>=2,<3",
+  "optbinning>=0.21,<0.22",
+  "pandas>=2.2,<4",
+  "scikit-learn>=1.6,<2",
 ]
 
 [dependency-groups]
