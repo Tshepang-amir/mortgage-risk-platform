@@ -10,10 +10,10 @@ This file exists so that a session starting cold can reconstruct where work stop
 
 Update these four lines at the end of every session. They are the first thing read on a cold start.
 
-- Current phase: 5 in progress. The model stack is implemented and tested; the real-data exit run is outstanding.
-- Last completed exit criterion: Phase 4. Phase 5 engineering gate passed on 2026-09-21: Ruff clean, 59 files formatted, mypy clean on 42 source files, pytest 92 passed in 535.81 seconds with 88.75 percent coverage.
-- Blocked on: no real Bronze, Silver, Gold, or macro Delta data exists, `FRED_API_KEY` is unset, and no MLflow tracking URI is configured. Synthetic metrics are not exit evidence.
-- Next action: build the real medallion tables and point-in-time macro data, then run Phase 5 against an explicit Gold Delta version and require the clustered Gini-improvement interval to clear zero.
+- Current phase: 6 in progress. Phase 5 and 6 model stacks are implemented and tested; both real-data exit runs are outstanding.
+- Last completed exit criterion: Phase 4. Phase 6 engineering gate passed on 2026-09-21: Ruff clean, 66 files formatted, mypy clean on 47 source files, pytest 99 passed in 553.28 seconds with 89.22 percent coverage.
+- Blocked on: no real Bronze, Silver, Gold, or macro Delta data exists, `FRED_API_KEY` is unset, and no MLflow tracking URI is configured. Synthetic metrics and model selections are not exit evidence.
+- Next action: build the real medallion tables and point-in-time macro data, complete the Phase 5 real scorecard run, then run Phase 6 on the same Gold Delta version and record the out-of-time selection interval.
 
 ---
 
@@ -27,7 +27,7 @@ Update these four lines at the end of every session. They are the first thing re
 | 3 | Golden-record test | complete | 2026-09-17 |
 | 4 | Gold panel | complete | 2026-09-17 |
 | 5 | Baselines and scorecard | in progress | |
-| 6 | Challenger model | not started | |
+| 6 | Challenger model | in progress | |
 | 7 | Validation pack | not started | |
 | 8 | IFRS 9 ECL layer | not started | |
 | 9 | Explainability, fairness, governance | not started | |
@@ -84,6 +84,7 @@ One line per ADR, pointing at the full record.
 | ADR-008 | Adopt the confirmed 113-field current raw-file layout | `docs/decisions/ADR-008-current-file-width.md` |
 | ADR-009 | Treat published text length as a quality signal rather than a parse failure | `docs/decisions/ADR-009-text-length-is-a-quality-signal.md` |
 | ADR-010 | Use constrained OptBinning, deterministic loan sampling, and loan-clustered evaluation | `docs/decisions/ADR-010-scorecard-training-design.md` |
+| ADR-011 | Calibrate temporally and require interval evidence to ship LightGBM | `docs/decisions/ADR-011-challenger-calibration-and-selection.md` |
 
 ---
 
@@ -544,3 +545,28 @@ Added deterministic whole-loan extraction from an explicit Gold Delta version, u
 **Results produced:** none. No synthetic AUC, Gini, or interval belongs in the ledger.
 
 **Next action:** execute Bronze, Silver, macro ingestion, and Gold publication on the real files, then call the Phase 5 trainer with the published Gold Delta version and the configured MLflow server. Close Phase 5 only if the scorecard's validation Gini improvement has a lower 95 percent loan-clustered bound above zero.
+
+
+---
+
+### 2026-09-21, Phase 6 implementation complete; real-data selection outstanding
+
+**What I set out to do:** implement the LightGBM production challenger with mandatory FICO, LTV, and DTI monotonic constraints, prove those constraints with synthetic sweeps, calibrate probabilities separately from ranking, compare against the scorecard with a clustered interval, and track the complete decision in MLflow.
+
+**What I actually did:** locked LightGBM 4.7.0 and added a deterministic binary classifier with shallow regularized trees and ordered constraints of -1 for FICO, +1 for original LTV, DTI, and current LTV, and zero for the remaining features. Added ceteris-paribus sweep validation that fails on a directional reversal and runs against the final calibrated model, not merely the raw constructor configuration.
+
+The challenger and scorecard are fitted on `train`. The already-fitted challenger is wrapped in scikit-learn's `FrozenEstimator` and sigmoid-calibrated on `validation`; model selection uses only `out_of_time`. The run reports scorecard, raw-challenger, and calibrated-challenger AUC/Gini separately from raw and calibrated Brier scores, then bootstraps calibrated-challenger minus scorecard Gini in paired loan clusters. The generated decision selects LightGBM only when the lower 95 percent bound is above zero.
+
+MLflow logs the Delta version, feature hash, ordered constraints, temporal roles, metrics, interval, feature importance, monotonic sweeps, generated selection JSON, scorecard reference, and raw and calibrated challenger models with signatures. Added `docs/challenger-methodology.md` and accepted ADR-011.
+
+**What works now, with evidence:** the real constrained LightGBM model passes all four monotonic sweeps, a deliberately inverted FICO predictor fails the guard, sigmoid calibration preserves ranking in the integration fixture, and the SQLite-backed MLflow run records all expected contracts and artifacts. The complete container gate is green: Ruff clean, 66 files formatted, mypy clean on 47 source files, and **99 tests passed in 553.28 seconds with 89.22 percent coverage**.
+
+**What is broken or incomplete:** Phase 6 is not closed, and Phase 5 remains open for the same upstream reason. There is no real Bronze, Silver, Gold, or macro Delta data, `FRED_API_KEY` is unset, and `MLFLOW_TRACKING_URI` is unset. No real out-of-time comparison exists, so there is no challenger-versus-scorecard decision to write into the results ledger. Synthetic model selection is deliberately ignored.
+
+**Decisions made and why:** ADR-011 chooses the binary objective because the response is a binary 12-month event, LightGBM's intermediate monotonic method to avoid the basic method's over-constraint without paying for advanced complexity, sigmoid calibration because it is stable for sparse default samples, and a frozen train/validation/out-of-time sequence that does not randomize or refit across temporal boundaries. The scorecard remains the default unless clustered interval evidence supports the challenger.
+
+**Surprises, dead ends, and what I learned from them:** the first runtime sweep checked raw LightGBM only. Review caught that calibration is part of the deployed probability model and could theoretically invert ordering, so the trainer now asserts the calibrated model too. A combined mypy-and-integration command timed out despite each component being healthy; splitting it showed the model tests take seconds and the tracked run about 20 seconds. The Windows patch helper continued to fail intermittently, so narrowly scoped UTF-8 writes were used only after failed patch attempts.
+
+**Results produced:** none. Synthetic AUC, Brier, Gini, bootstrap intervals, and model selection do not belong in the ledger.
+
+**Next action:** build the real medallion and point-in-time macro tables, complete the Phase 5 scorecard run, then execute Phase 6 against the same Gold Delta version. Write the real out-of-time interval and resulting ship decision to this log whether LightGBM wins or loses.

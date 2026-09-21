@@ -4,11 +4,12 @@ Mortgage credit risk on Fannie Mae loan performance data: a discrete-time
 hazard probability-of-default model, an IFRS 9 expected credit loss layer, and
 a model validation pack of the kind a bank's model risk function would demand.
 
-**Status: Phase 4 of 11 complete; Phase 5 implementation is in progress.** The
-Gold survival panel and leakage controls are complete. The baseline, WOE
-scorecard, spline hazard model, clustered bootstrap, and MLflow tracking path
-are implemented and tested, but no model has been trained on real Gold data and
-no results have been produced.
+**Status: Phase 4 of 11 complete; Phase 5 and 6 implementations are in progress.**
+The Gold survival panel and leakage controls are complete. The baseline, WOE
+scorecard, spline hazard model, constrained LightGBM challenger, temporal
+calibration, clustered comparison, and MLflow tracking paths are implemented
+and tested, but no model has been trained on real Gold data and no results have
+been produced.
 This README is recruiter-facing and is written properly in Phase 11,
 once there are numbers to put at the top of it.
 
