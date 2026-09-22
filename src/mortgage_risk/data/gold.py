@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -50,10 +51,33 @@ class GoldReconciliation:
 
 @dataclass(frozen=True, slots=True)
 class GoldPublicationResult:
-    """Published Gold table counts and reproducible Delta version."""
+    """Published Gold counts, its Delta version, and the versions it was built from."""
 
     reconciliation: GoldReconciliation
     delta_version: int
+    source_versions: Mapping[str, int]
+
+
+_REQUIRED_SOURCE_VERSIONS: Final = frozenset({"silver", "macro"})
+
+
+def require_source_versions(source_versions: Mapping[str, int]) -> Mapping[str, int]:
+    """Validate the input Delta versions a Gold build is derived from.
+
+    Section 8 makes Delta time travel the reproducibility mechanism. Recording
+    only the version Gold was written at leaves the build irreproducible: it
+    says what was produced, not what it was produced from.
+    """
+    missing = sorted(_REQUIRED_SOURCE_VERSIONS.difference(source_versions))
+    if missing:
+        raise ValueError(f"missing source Delta versions: {missing}")
+    unexpected = sorted(set(source_versions).difference(_REQUIRED_SOURCE_VERSIONS))
+    if unexpected:
+        raise ValueError(f"unexpected source Delta versions: {unexpected}")
+    negative = sorted(name for name, version in source_versions.items() if version < 0)
+    if negative:
+        raise ValueError(f"source Delta versions must be non-negative: {negative}")
+    return dict(source_versions)
 
 
 def build_survival_panel(
@@ -178,13 +202,14 @@ def build_gold_panel(silver: DataFrame, macro: DataFrame) -> DataFrame:
     """Build the labelled, point-in-time-correct Gold modelling panel."""
     survival = build_survival_panel(silver)
     featured = engineer_loan_features(survival)
-    with_current_macro = join_macro_point_in_time(featured, macro)
+    with_current_macro = join_macro_point_in_time(featured, macro, allow_pre_archive_missing=True)
     with_origination_hpi = join_macro_point_in_time(
         with_current_macro,
         macro,
         as_of_column="ORIG_DATE",
         series_ids=("CSUSHPINSA",),
         prefix="ORIG_",
+        allow_pre_archive_missing=True,
     )
     with_current_ltv = add_hpi_adjusted_current_ltv(with_origination_hpi)
     return assign_model_splits(with_current_ltv)
@@ -231,8 +256,11 @@ def publish_gold(
     silver: DataFrame,
     macro: DataFrame,
     gold_path: Path,
+    *,
+    source_versions: Mapping[str, int],
 ) -> GoldPublicationResult:
     """Build, reconcile, and overwrite the derived Gold Delta table."""
+    recorded_sources = require_source_versions(source_versions)
     candidate = build_gold_panel(silver, macro)
     reconciliation = reconcile_gold_panel(silver, candidate)
     target = str(gold_path.resolve())
@@ -248,6 +276,7 @@ def publish_gold(
     return GoldPublicationResult(
         reconciliation=reconciliation,
         delta_version=int(version_row["version"]),
+        source_versions=recorded_sources,
     )
 
 

@@ -30,14 +30,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # The published MLflow image ships no Postgres driver, so install it before
+    # the server starts. Section 8 specifies a Postgres-backed tracking store.
     command: >
+      bash -c "pip install --no-cache-dir psycopg2-binary &&
       mlflow server
       --host 0.0.0.0
       --port 5000
       --backend-store-uri postgresql://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
-      --artifacts-destination /mlartifacts
+      --artifacts-destination /mlartifacts"
+    # Host port is not 5000: on this machine ProjectWise Drive holds ::1:5000,
+    # and Windows resolves localhost to IPv6 first, so 5000 would reach it
+    # instead of MLflow. Override with MLFLOW_PORT if 5555 is taken.
     ports:
-      - "5000:5000"
+      - "${MLFLOW_PORT:-5555}:5000"
     volumes:
       - mlflow-artifacts:/mlartifacts
 

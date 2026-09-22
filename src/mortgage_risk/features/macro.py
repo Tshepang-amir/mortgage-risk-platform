@@ -161,6 +161,7 @@ def join_macro_point_in_time(
     as_of_column: str = "ACT_PERIOD",
     series_ids: Sequence[str] = FRED_SERIES_IDS,
     prefix: str = "",
+    allow_pre_archive_missing: bool = False,
 ) -> DataFrame:
     """Join the latest macro release available on each panel as-of date."""
     if as_of_column not in frame.columns:
@@ -195,9 +196,20 @@ def join_macro_point_in_time(
         .drop("_MACRO_RANK")
     )
 
+    present_series = {
+        str(row["SERIES_ID"])
+        for row in macro.where(spark_fn.col("SERIES_ID").isin(*series_ids))
+        .select("SERIES_ID")
+        .distinct()
+        .collect()
+    }
+    absent_series = sorted(set(series_ids).difference(present_series))
+    if absent_series:
+        raise MacroCoverageError(f"macro series absent from archive: {absent_series}")
+
     expected_count = as_of_dates.count() * len(series_ids)
     actual_count = latest.count()
-    if actual_count != expected_count:
+    if not allow_pre_archive_missing and actual_count != expected_count:
         raise MacroCoverageError(
             f"macro coverage incomplete: expected {expected_count} date-series pairs, "
             f"found {actual_count}"

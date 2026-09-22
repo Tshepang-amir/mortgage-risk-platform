@@ -27,6 +27,7 @@ from pyspark.sql import types as spark_types
 from mortgage_risk.config.gold import FRED_SERIES_IDS, OUTCOME_COLUMNS
 from mortgage_risk.data.gold import build_gold_panel, reconcile_gold_panel
 from mortgage_risk.features.macro import (
+    MacroCoverageError,
     MacroObservation,
     join_macro_point_in_time,
     macro_observations_frame,
@@ -332,6 +333,51 @@ def test_point_in_time_join_ignores_a_later_revision(spark_session: SparkSession
         "a revision published in 2020 leaked into a 2015 loan-month"
     )
     assert row["CSUSHPINSA_AVAILABLE_DATE"] <= as_of
+
+
+def test_pre_archive_dates_are_null_only_when_explicitly_allowed(
+    spark_session: SparkSession,
+) -> None:
+    """Unavailable vintages stay missing instead of being backfilled with revisions."""
+    frame = spark_session.createDataFrame(
+        [
+            ("OLD", date(2005, 1, 1)),
+            ("COVERED", date(2015, 1, 1)),
+        ],
+        spark_types.StructType(
+            [
+                spark_types.StructField("LOAN_ID", spark_types.StringType(), False),
+                spark_types.StructField("ACT_PERIOD", spark_types.DateType(), False),
+            ]
+        ),
+    )
+    macro = macro_observations_frame(
+        spark_session,
+        (
+            MacroObservation(
+                "CSUSHPINSA",
+                date(2014, 10, 1),
+                date(2014, 12, 30),
+                Decimal("166.57"),
+            ),
+        ),
+    )
+
+    with pytest.raises(MacroCoverageError, match="coverage incomplete"):
+        join_macro_point_in_time(frame, macro, series_ids=("CSUSHPINSA",))
+
+    joined = join_macro_point_in_time(
+        frame,
+        macro,
+        series_ids=("CSUSHPINSA",),
+        allow_pre_archive_missing=True,
+    )
+    rows = {row["LOAN_ID"]: row for row in joined.collect()}
+
+    assert rows["OLD"]["CSUSHPINSA"] is None
+    assert rows["OLD"]["CSUSHPINSA_AVAILABLE_DATE"] is None
+    assert rows["COVERED"]["CSUSHPINSA"] == Decimal("166.570000")
+    assert rows["COVERED"]["CSUSHPINSA_AVAILABLE_DATE"] == date(2014, 12, 30)
 
 
 # ---------------------------------------------------------------------------
