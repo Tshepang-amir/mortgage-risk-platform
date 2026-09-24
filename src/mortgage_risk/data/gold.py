@@ -80,6 +80,15 @@ def require_source_versions(source_versions: Mapping[str, int]) -> Mapping[str, 
     return dict(source_versions)
 
 
+def _overwrite_delta(frame: DataFrame, target: Path) -> None:
+    (
+        frame.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(str(target.resolve()))
+    )
+
+
 def build_survival_panel(
     silver: DataFrame,
     *,
@@ -258,18 +267,26 @@ def publish_gold(
     gold_path: Path,
     *,
     source_versions: Mapping[str, int],
+    staging_path: Path | None = None,
 ) -> GoldPublicationResult:
-    """Build, reconcile, and overwrite the derived Gold Delta table."""
+    """Materialise once into staging, reconcile that, then promote.
+
+    Reconciliation consumes the panel several times, for the per-loan counts,
+    the total, and the distinct loan count, and the write consumes it again.
+    Held lazily each consumption re-runs the whole panel build, including the
+    window functions partitioned by loan that derive censoring and at-risk
+    status. Staging first collapses that to one build, and everything after
+    reads a materialised columnar table.
+    """
     recorded_sources = require_source_versions(source_versions)
+    staging = staging_path if staging_path is not None else gold_path.parent / "_staging_gold"
     candidate = build_gold_panel(silver, macro)
-    reconciliation = reconcile_gold_panel(silver, candidate)
+    _overwrite_delta(candidate, staging)
+    staged = spark.read.format("delta").load(str(staging.resolve()))
+
+    reconciliation = reconcile_gold_panel(silver, staged)
     target = str(gold_path.resolve())
-    (
-        candidate.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .save(target)
-    )
+    _overwrite_delta(staged, gold_path)
     version_row = DeltaTable.forPath(spark, target).history(1).select("version").first()
     if version_row is None:
         raise GoldReconciliationError("Gold Delta table has no committed version")

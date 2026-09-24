@@ -32,6 +32,7 @@ def test_pipeline_paths_name_every_publication_layer(tmp_path: Path) -> None:
     assert paths.bronze == tmp_path / "delta" / "bronze"
     assert paths.silver == tmp_path / "delta" / "silver"
     assert paths.macro == tmp_path / "delta" / "macro"
+    assert paths.silver_staging == tmp_path / "delta" / "_staging_silver"
     assert paths.gold == tmp_path / "delta" / "gold"
 
 

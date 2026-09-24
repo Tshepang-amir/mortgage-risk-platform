@@ -13,7 +13,7 @@ from typing import Final, cast
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 
-from mortgage_risk.common.spark import build_local_spark
+from mortgage_risk.common.spark import build_local_spark, effective_driver_memory
 from mortgage_risk.config.gold import FRED_SERIES_IDS
 from mortgage_risk.data.bronze import ingest_bronze
 from mortgage_risk.data.gold import publish_gold
@@ -36,6 +36,10 @@ _RAW_FILENAMES: Final = (
     "2018Q1.csv",
 )
 _STAGES: Final = ("macro", "bronze", "silver", "gold", "all")
+# Real-data sizing. The library defaults suit synthetic fixtures; a 177
+# million row shuffle at two partitions cannot fit in any heap.
+_REAL_CORES: Final = 10
+_REAL_SHUFFLE_PARTITIONS: Final = 400
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,14 @@ class PipelinePaths:
     @property
     def quarantine(self) -> Path:
         return self.delta_dir / "quarantine" / "silver"
+
+    @property
+    def silver_staging(self) -> Path:
+        return self.delta_dir / "_staging_silver"
+
+    @property
+    def gold_staging(self) -> Path:
+        return self.delta_dir / "_staging_gold"
 
     @property
     def macro(self) -> Path:
@@ -157,6 +169,7 @@ def run_stage(spark: SparkSession, stage: str, paths: PipelinePaths) -> None:
             paths.silver,
             paths.servicer,
             quarantine_path=paths.quarantine,
+            staging_path=paths.silver_staging,
         )
         print(f"silver published: {silver_result}")
         return
@@ -169,6 +182,7 @@ def run_stage(spark: SparkSession, stage: str, paths: PipelinePaths) -> None:
             macro,
             paths.gold,
             source_versions={"silver": silver_version, "macro": macro_version},
+            staging_path=paths.gold_staging,
         )
         print(f"gold published: {gold_result}")
         return
@@ -185,7 +199,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     paths = PipelinePaths(arguments.raw_dir, arguments.external_dir, arguments.delta_dir)
 
-    spark = build_local_spark("mortgage-risk-real-data", paths.warehouse)
+    spark = build_local_spark(
+        "mortgage-risk-real-data",
+        paths.warehouse,
+        cores=_REAL_CORES,
+        shuffle_partitions=_REAL_SHUFFLE_PARTITIONS,
+    )
+    print(
+        f"spark: cores={_REAL_CORES} shuffle_partitions={_REAL_SHUFFLE_PARTITIONS} "
+        f"driver_memory={effective_driver_memory(spark)}"
+    )
     try:
         stages = (
             ("macro", "bronze", "silver", "gold")
@@ -195,7 +218,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for stage in stages:
             run_stage(spark, stage, paths)
     finally:
-        spark.stop()
+        # A failure that kills the JVM makes stop() raise ConnectionRefusedError,
+        # which would replace the real cause with a meaningless one.
+        try:
+            spark.stop()
+        except Exception as exc:
+            print(f"warning: Spark shutdown failed after the run: {exc!r}")
     return 0
 
 

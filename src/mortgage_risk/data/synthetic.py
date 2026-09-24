@@ -209,7 +209,7 @@ def _loan_month_record(
     total_principal = scheduled_principal if month_index > 0 else Decimal("0.00")
     is_event_month = outcome.event_month == month_index + 1
 
-    delinquency = "0"
+    delinquency = "00"
     zero_balance_code = ""
     zero_balance_date = ""
     removal_upb = ""
@@ -217,12 +217,12 @@ def _loan_month_record(
     if outcome.event_type == "default" and outcome.event_month is not None:
         months_to_default = outcome.event_month - month_index - 1
         if months_to_default <= 0:
-            delinquency = "3"
+            delinquency = "03"
             last_paid_installment = _format_month(_add_months(reporting_month, -3))
         elif months_to_default == 1:
-            delinquency = "2"
+            delinquency = "02"
         elif months_to_default == 2:
-            delinquency = "1"
+            delinquency = "01"
     if is_event_month and outcome.event_type == "prepaid":
         zero_balance_code = "01"
         zero_balance_date = _format_month(reporting_month)

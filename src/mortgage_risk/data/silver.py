@@ -171,6 +171,15 @@ def build_servicer_dimension(silver: DataFrame) -> DataFrame:
     )
 
 
+def _overwrite_delta(frame: DataFrame, target: Path) -> None:
+    (
+        frame.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .save(str(target.resolve()))
+    )
+
+
 def publish_silver(
     spark: SparkSession,
     bronze_path: Path,
@@ -178,37 +187,38 @@ def publish_silver(
     servicer_path: Path,
     *,
     quarantine_path: Path | None = None,
+    staging_path: Path | None = None,
 ) -> SilverPublicationResult:
-    """Validate first, then replace the derived Silver Delta tables."""
+    """Materialise once into staging, validate that, then promote.
+
+    The transform is consumed repeatedly: by the quality suite, by the row
+    counts, by the servicer dimension, and by the writes. Held lazily, each
+    consumption re-runs the whole dedup shuffle. At 177 million rows that turned
+    a single pass into more than a day's work, and the quality suite additionally
+    tried to cache the full frame in the driver heap, spilling 70 GB.
+
+    Writing to staging first collapses that to one transform. Everything
+    afterwards reads a materialised columnar table, and the gate still runs
+    before anything reaches the published Silver path.
+    """
+    staging = staging_path if staging_path is not None else silver_path.parent / "_staging_silver"
     candidate = transform_to_silver(read_bronze(spark, bronze_path))
+    _overwrite_delta(candidate, staging)
+    staged = spark.read.format("delta").load(str(staging.resolve()))
+
     try:
-        quality = validate_silver(candidate)
+        quality = validate_silver(staged)
     except DataQualityError:
         if quarantine_path is not None:
-            (
-                candidate.write.format("delta")
-                .mode("overwrite")
-                .option("overwriteSchema", "true")
-                .save(str(quarantine_path.resolve()))
-            )
+            _overwrite_delta(staged, quarantine_path)
         raise
 
-    dimension = build_servicer_dimension(candidate)
-    silver_rows = candidate.count()
+    dimension = build_servicer_dimension(staged)
+    silver_rows = staged.count()
     servicer_rows = dimension.count()
 
-    (
-        candidate.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .save(str(silver_path.resolve()))
-    )
-    (
-        dimension.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .save(str(servicer_path.resolve()))
-    )
+    _overwrite_delta(staged, silver_path)
+    _overwrite_delta(dimension, servicer_path)
     return SilverPublicationResult(
         silver_rows=silver_rows,
         servicer_rows=servicer_rows,

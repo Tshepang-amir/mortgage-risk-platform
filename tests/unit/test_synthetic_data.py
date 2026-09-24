@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mortgage_risk.data.quality import _ALLOWED_DELINQUENCY_STATUSES
 from mortgage_risk.data.schema import SAMPLE_FILE_FIELD_COUNT, split_pipe_row
 from mortgage_risk.data.synthetic import (
     SELECTED_ACQUISITION_QUARTERS,
@@ -38,7 +39,7 @@ def test_synthetic_panel_has_known_ground_truth_events() -> None:
         outcome.loan_id for outcome in panel.outcomes.values() if outcome.event_type == "default"
     }
     default_rows = [row for row in panel.rows if row["LOAN_ID"] in default_ids]
-    assert any(row["DLQ_STATUS"] == "3" for row in default_rows)
+    assert any(row["DLQ_STATUS"] == "03" for row in default_rows)
 
 
 def test_synthetic_panel_spans_selected_quarters() -> None:
@@ -58,3 +59,25 @@ def test_synthetic_panel_writes_headerless_pipe_file(tmp_path: Path) -> None:
     assert lines
     assert not lines[0].startswith("POOL_ID")
     assert len(split_pipe_row(lines[0])) == SAMPLE_FILE_FIELD_COUNT
+
+
+def test_generated_delinquency_statuses_satisfy_the_silver_contract() -> None:
+    """The generator may only emit values the Silver gate accepts.
+
+    This is the guard for a real defect. The generator emitted unpadded "0"
+    to "3" while Fannie Mae writes zero-padded "00" to "99" plus "XX", and the
+    Silver allowed-set had been calibrated against the generator rather than
+    the data. The contract therefore passed on synthetic input and rejected
+    95.7 percent of real rows, and nothing caught it until real data arrived.
+
+    Tying the two together means a future divergence fails here, in seconds,
+    rather than after a two and a half hour Silver build. See ADR-013.
+    """
+    panel = generate_synthetic_panel(loan_count=40, max_months=36, seed=20260923)
+    emitted = {row["DLQ_STATUS"] for row in panel.rows}
+
+    assert emitted, "generator produced no delinquency statuses"
+    assert emitted.issubset(set(_ALLOWED_DELINQUENCY_STATUSES)), (
+        f"generator emits values the Silver contract rejects: "
+        f"{sorted(emitted.difference(_ALLOWED_DELINQUENCY_STATUSES))}"
+    )
